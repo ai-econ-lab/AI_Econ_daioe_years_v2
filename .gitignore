@@ -6,8 +6,11 @@ dist/
 wheels/
 *.egg-info
 
-# Local development environments
-.venv/
-.claude/
-.ruff_cache/
+.ruff_cache
+.python-version
 
+# Virtual environments
+.venv
+.vscode
+.claude
+src/
