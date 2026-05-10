@@ -7,12 +7,23 @@ import pandas as pd
 import plotly.graph_objects as go
 import polars as pl
 from great_tables import GT
+from shiny import ui
+
+# ---------------------------------------------------
+# Mardown Files
+# ------------
+# BASE_DIR = Path(__file__).resolve().parent
+
+BASE_DIR = Path.cwd()
+
+INTRO_MD = (BASE_DIR / "md_files" / "intro.md").read_text(encoding="utf-8")
+
 
 # ---------------------------------------------------
 # Data Preliminaries
 # ---------------------------------------------------
 
-DATA_PATH = Path.cwd().resolve() / "data" / "daioe_scb_years_processed.parquet"
+DATA_PATH = BASE_DIR / "data" / "daioe_scb_years_processed.parquet"
 
 lf = pl.scan_parquet(DATA_PATH)
 
@@ -29,7 +40,8 @@ LEVELS = lf.select(pl.col("level").unique().sort()).collect().to_series().to_lis
 
 
 def build_choices_by_level(
-    lf: pl.LazyFrame, levels: list[str]
+    lf: pl.LazyFrame,
+    levels: list[str],
 ) -> dict[str, dict[str, str]]:
     out = {}
     for lvl in levels:
@@ -78,13 +90,13 @@ METRICS: dict[str, str] = {
     "daioe_allapps": "📚 All Applications",
     "daioe_stratgames": "♟️ Strategy Games",
     "daioe_videogames": "🎮 Video Games (Real-Time)",
-    "daioe_imgrec": "🖼️ Image Recognition",
-    "daioe_imgcompr": "🧩 Image Comprehension",
-    "daioe_imggen": "🎨 Image Generation",
+    "daioe_imgrec": "🖼️🔎 Image Recognition",
+    "daioe_imgcompr": "🧩🖼️ Image Comprehension",
+    "daioe_imggen": "🖌️🖼️ Image Generation",
     "daioe_readcompr": "📖 Reading Comprehension",
-    "daioe_lngmod": "✍️ Language Modeling",
-    "daioe_translat": "🌐 Translation",
-    "daioe_speechrec": "🎙️ Speech Recognition",
+    "daioe_lngmod": "✍️🤖 Language Modeling",
+    "daioe_translat": "🌐🔤 Translation",
+    "daioe_speechrec": "🗣️🎙️ Speech Recognition",
 }
 
 
@@ -185,7 +197,7 @@ def as_great_table_html(df, metrics: dict[str, str]) -> ui.TagChild:
         return ui.p("No data available for the selected filters.")
 
     df_display = df.rename(
-        columns={c: readable_column_name(c, metrics) for c in df.columns}
+        columns={c: readable_column_name(c, metrics) for c in df.columns},
     )
 
     float_cols = [
