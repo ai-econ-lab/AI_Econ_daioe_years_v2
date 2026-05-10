@@ -1,7 +1,11 @@
+from pathlib import Path
+
 import polars as pl
 from shiny import reactive
-from shiny.express import input, render, ui
+from shiny.express import app_opts, input, render, ui
 from shinywidgets import render_plotly
+
+app_opts(static_assets={"/logos": Path(__file__).parent / "logos"})
 
 import calcs
 import visuals
@@ -33,7 +37,10 @@ DEFAULT_LEVEL = "SSYK4" if "SSYK4" in LEVELS else LEVELS[0]
 DEFAULT_OCCUPATION = next(iter(OCCUPATION_CHOICES[DEFAULT_LEVEL]))
 
 ui.page_opts(
-    title="Yearly DAIOE Explorer of Swedish Occupations",
+    title=ui.tags.span(
+        ui.tags.img(src="logos/lab.svg", height="32px", style="margin-right:10px;vertical-align:middle;"),
+        "Yearly DAIOE Explorer of Swedish Occupations",
+    ),
     theme=ui.Theme.from_brand(__file__),
     fillable=True,
     lang="en",
