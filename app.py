@@ -1,458 +1,271 @@
-from pathlib import Path
-
-import faicons as fa
-import plotly.express as px
-import plotly.graph_objects as go
 import polars as pl
 from shiny import reactive
 from shiny.express import input, render, ui
 from shinywidgets import render_plotly
 
-# ── Data ───────────────────────────────────────────────────────────────────────
-DATA_PATH = Path(__file__).parent / "data" / "daioe_scb_years_processed.parquet"
-df_full = pl.read_parquet(DATA_PATH)
-
-YEARS = sorted(df_full["year"].unique().to_list())
-LEVELS = ["SSYK1", "SSYK2", "SSYK3", "SSYK4"]
-AGE_GROUPS = sorted(df_full["age_group"].unique().to_list())
-
-AI_CAPS = {
-    "All Applications":     "daioe_allapps_avg",
-    "Generative AI":        "daioe_genai_avg",
-    "Language Models":      "daioe_lngmod_avg",
-    "Translation":          "daioe_translat_avg",
-    "Reading Comprehension":"daioe_readcompr_avg",
-    "Speech Recognition":   "daioe_speechrec_avg",
-    "Image Recognition":    "daioe_imgrec_avg",
-    "Image Comprehension":  "daioe_imgcompr_avg",
-    "Image Generation":     "daioe_imggen_avg",
-    "Video Games":          "daioe_videogames_avg",
-    "Strategic Games":      "daioe_stratgames_avg",
-}
-
-SEX_COLORS = {"men": "#4C72B0", "women": "#DD8452"}
-
-
-def selected_sexes():
-    return list(input.sex() or [])
-
-
-def filter_rows(level=None, year_range=None, year=None):
-    d = df_full.filter(pl.col("level") == (level or input.level()))
-    if year_range is not None:
-        d = d.filter(pl.col("year").is_between(year_range[0], year_range[1]))
-    if year is not None:
-        d = d.filter(pl.col("year") == year)
-    d = d.filter(pl.col("sex").is_in(selected_sexes()))
-    if input.age_group() != "All":
-        d = d.filter(pl.col("age_group") == input.age_group())
-    return d
-
-
-def pct_change_expr(chg_col, out_col):
-    base = pl.col("count").sum() - pl.col(chg_col).sum()
-    return (
-        pl.when(base != 0)
-        .then(pl.col(chg_col).sum() / base * 100)
-        .otherwise(None)
-        .alias(out_col)
-    )
-
-
-def format_number(value, template):
-    if value is None or value != value:
-        return "N/A"
-    return format(value, template)
-
-
-def format_percent(value, template):
-    if value is None or value != value:
-        return "N/A"
-    return f"{format(value, template)}%"
-
-
-# ── Page ───────────────────────────────────────────────────────────────────────
-ui.page_opts(
-    title="DAIOE — AI Occupational Exposure Dashboard",
-    fillable=True,
+import calcs
+import visuals
+from setup import (
+    AGES,
+    INTRO_MD,
+    LEVELS,
+    METRICS,
+    SEXES,
+    YEAR_MAX,
+    YEAR_MIN,
+    YEARS,
+    as_great_table_html,
+    build_choices_by_level,
+    download_extension,
+    download_media_type,
+    export_filtered_data,
+    lf,
 )
 
-# ── Sidebar ────────────────────────────────────────────────────────────────────
-with ui.sidebar(width=270):
-    ui.h6("Filters", class_="fw-bold mt-1")
+LEVEL_LABELS = {
+    "SSYK1": "SSYK 1 - Major groups",
+    "SSYK2": "SSYK 2 - Minor groups",
+    "SSYK3": "SSYK 3 - Unit groups",
+    "SSYK4": "SSYK 4 - Detailed units",
+}
+OCCUPATION_CHOICES = build_choices_by_level(lf, LEVELS)
+DEFAULT_LEVEL = "SSYK4" if "SSYK4" in LEVELS else LEVELS[0]
+DEFAULT_OCCUPATION = next(iter(OCCUPATION_CHOICES[DEFAULT_LEVEL]))
 
-    ui.input_select(
-        "level", "Hierarchy Level",
-        choices={"SSYK1": "SSYK 1 — Major groups",
-                 "SSYK2": "SSYK 2 — Minor groups",
-                 "SSYK3": "SSYK 3 — Unit groups",
-                 "SSYK4": "SSYK 4 — Detailed units"},
-        selected="SSYK2",
-    )
-    ui.input_slider(
-        "year_range", "Year Range",
-        min=min(YEARS), max=max(YEARS),
-        value=[min(YEARS), max(YEARS)],
-        step=1, sep="",
-    )
-    ui.input_select(
-        "year_snap", "Snapshot Year",
-        choices={str(y): str(y) for y in YEARS},
-        selected=str(max(YEARS)),
-    )
-    ui.input_checkbox_group(
-        "sex", "Sex",
-        choices={"men": "Men", "women": "Women"},
-        selected=["men", "women"],
-    )
-    ui.input_select(
-        "age_group", "Age Group",
-        choices={"All": "All ages"} | {a: a for a in AGE_GROUPS},
-        selected="All",
-    )
-    ui.hr()
-    ui.input_select(
-        "ai_cap", "AI Capability",
-        choices=list(AI_CAPS.keys()),
-        selected="Generative AI",
-    )
-    ui.input_numeric("top_n", "Top N Occupations", value=15, min=5, max=50, step=5)
-
-
-# ── Reactive data ──────────────────────────────────────────────────────────────
-@reactive.calc
-def filtered():
-    """Time-series slice respecting all sidebar filters."""
-    return filter_rows(level=input.level(), year_range=input.year_range())
+ui.page_opts(
+    title="Yearly DAIOE Explorer of Swedish Occupations",
+    theme=ui.Theme.from_brand(__file__),
+    fillable=True,
+    lang="en",
+    full_width=True,
+)
 
 
 @reactive.calc
-def snapshot_rows():
-    """Raw cross-sectional slice respecting all sidebar filters."""
-    return filter_rows(level=input.level(), year=int(input.year_snap()))
+def _download_frame():
+    """Collect filtered rows for the download tab."""
+    occupations = list(input.download_occupation()) if input.download_occupation() else None
+    years = input.download_years()
+    age = input.download_age()
+    sexes = list(input.download_sex())
+
+    data = lf.filter(
+        (pl.col("level") == input.download_level())
+        & pl.col("year").is_between(int(years[0]), int(years[1])),
+    )
+    if sexes:
+        data = data.filter(pl.col("sex").is_in(sexes))
+    if age != "All":
+        data = data.filter(pl.col("age_group") == age)
+    if occupations:
+        data = data.filter(pl.col("occupation").is_in(occupations))
+    return data.collect()
 
 
 @reactive.calc
-def snapshot():
-    """Cross-sectional slice for the snapshot year, aggregated over sex/age."""
-    cap_col = AI_CAPS[input.ai_cap()]
-    return (
-        snapshot_rows().group_by("ssyk_code", "occupation")
-        .agg(
-            pl.col("count").sum(),
-            pl.col(cap_col).mean().alias("ai_score"),
-            pct_change_expr("chg_1y", "pct_chg_1y"),
-            pct_change_expr("chg_3y", "pct_chg_3y"),
-            pct_change_expr("chg_5y", "pct_chg_5y"),
-        )
-        .sort("ai_score", descending=True)
+def occ_summary():
+    """Reactive wrapper: returns summary dict for the selected occupation and year."""
+    return calcs.get_occ_summary(lf, input.occupation(), int(input.occ_year()))
+
+
+
+
+@reactive.calc
+def occ_employment_by_age():
+    """Reactive wrapper: returns long-format employment by age group for the line chart."""
+    return calcs.get_occ_employment_by_age(
+        lf,
+        input.occupation(),
+        (int(input.chart_year_range()[0]), int(input.chart_year_range()[1])),
+        list(input.chart_age_groups()),
     )
 
 
-# ── Tabs ───────────────────────────────────────────────────────────────────────
-with ui.navset_tab():
-
-    # ── Overview ───────────────────────────────────────────────────────────────
-    with ui.nav_panel("Overview"):
-
-        with ui.layout_columns(col_widths=[3, 3, 3, 3], class_="mb-3"):
-
-            with ui.value_box(showcase=fa.icon_svg("users"), theme="primary"):
-                "Total Employment"
-                @render.text
-                def kpi_total():
-                    return f"{filtered()['count'].sum():,.0f}"
-
-            with ui.value_box(showcase=fa.icon_svg("robot"), theme="info"):
-                "Avg GenAI Exposure"
-                @render.text
-                def kpi_genai():
-                    return format_number(filtered()["daioe_genai_avg"].mean(), ".3f")
-
-            with ui.value_box(showcase=fa.icon_svg("arrow-trend-up"), theme="success"):
-                "Avg 1-Year Emp. Change"
-                @render.text
-                def kpi_chg():
-                    val = filtered().select(pct_change_expr("chg_1y", "pct_chg_1y")).item()
-                    return format_percent(val, "+.1f")
-
-            with ui.value_box(showcase=fa.icon_svg("briefcase"), theme="secondary"):
-                "Occupations in View"
-                @render.text
-                def kpi_occ():
-                    return f"{filtered()['occupation'].n_unique():,}"
-
-        with ui.layout_columns(col_widths=[7, 5]):
-
-            with ui.card(full_screen=True):
-                ui.card_header("Total Employment Over Time by Sex")
-                @render_plotly
-                def plot_emp_trend():
-                    d = (
-                        filtered()
-                        .group_by("year", "sex")
-                        .agg(pl.col("count").sum())
-                        .sort("year")
-                        .to_pandas()
-                    )
-                    fig = px.line(
-                        d, x="year", y="count", color="sex",
-                        color_discrete_map=SEX_COLORS,
-                        markers=True, template="plotly_white",
-                        labels={"count": "Employed Persons", "year": "Year", "sex": "Sex"},
-                    )
-                    fig.update_xaxes(tickformat="d")
-                    fig.update_layout(legend_title="", margin=dict(t=10, b=30))
-                    return fig
-
-            with ui.card(full_screen=True):
-                ui.card_header("Employment Share by AI Exposure Level (Snapshot Year)")
-                @render_plotly
-                def plot_exp_dist():
-                    cap_col = AI_CAPS[input.ai_cap()]
-                    level_col = cap_col.replace("_avg", "_Level_Exposure")
-                    d = (
-                        snapshot_rows()
-                        .drop_nulls(level_col)
-                        .group_by(level_col)
-                        .agg(pl.col("count").sum())
-                        .sort(level_col)
-                        .to_pandas()
-                    )
-                    d[level_col] = d[level_col].astype(str)
-                    fig = px.bar(
-                        d, x=level_col, y="count",
-                        color=level_col,
-                        color_discrete_sequence=["#d73027", "#fc8d59", "#fee08b", "#91cf60", "#1a9850"],
-                        template="plotly_white",
-                        labels={level_col: "Exposure Level (1 = Low → 5 = High)",
-                                "count": "Employed Persons"},
-                    )
-                    fig.update_layout(showlegend=False, margin=dict(t=10, b=30))
-                    return fig
-
-    # ── AI Exposure Rankings ───────────────────────────────────────────────────
-    with ui.nav_panel("AI Exposure Rankings"):
-
+with ui.navset_pill(id="tab"):
+    with ui.nav_panel(title="1. Occupation View"):
         with ui.layout_columns(col_widths=[6, 6]):
+            with ui.card(full_screen=True):
+                ui.markdown(INTRO_MD)
+                with ui.div(class_="d-flex gap-3 align-items-end"):
+                    ui.input_select(
+                        "occ_level",
+                        "SSYK level",
+                        choices={level: LEVEL_LABELS.get(level, level) for level in LEVELS},
+                        selected=DEFAULT_LEVEL,
+                        width="200px",
+                    )
+                    ui.input_selectize(
+                        "occupation",
+                        "Occupation",
+                        choices=OCCUPATION_CHOICES[DEFAULT_LEVEL],
+                        selected=DEFAULT_OCCUPATION,
+                    )
+                    ui.input_select(
+                        "occ_year",
+                        "Year",
+                        choices={y: str(y) for y in YEARS},
+                        selected=YEAR_MAX,
+                        width="120px",
+                    )
+
+                @render.ui
+                def occ_value_boxes():
+                    """Render employment and % change value boxes for the selected occupation."""
+                    summary = occ_summary()
+                    if summary is None:
+                        return ui.p("No data available.")
+                    return visuals.build_value_boxes(summary, input.occupation())
 
             with ui.card(full_screen=True):
-                ui.card_header("Highest-Exposed Occupations")
+                ui.card_header("AI Exposure by Sub-domain")
+
                 @render_plotly
-                def plot_top():
-                    d = snapshot().head(input.top_n()).to_pandas().sort_values("ai_score")
-                    fig = px.bar(
-                        d, x="ai_score", y="occupation", orientation="h",
-                        color="ai_score", color_continuous_scale="RdYlGn",
-                        template="plotly_white",
-                        labels={"ai_score": input.ai_cap(), "occupation": ""},
-                        hover_data={"count": True},
-                    )
-                    fig.update_layout(coloraxis_showscale=False, margin=dict(t=10, l=10, b=30))
-                    return fig
+                def ai_exposure_bar():
+                    """Render bar chart of AI exposure level per sub-domain, coloured by index score."""
+                    df = calcs.get_occ_ai_exposure(lf, input.occupation(), int(input.occ_year()))
+                    return visuals.build_ai_exposure_bar(df.to_pandas(), input.occupation(), int(input.occ_year()))
+
+                ui.markdown(visuals.DAIOE_SOURCE_MD)
 
             with ui.card(full_screen=True):
-                ui.card_header("Lowest-Exposed Occupations")
-                @render_plotly
-                def plot_bot():
-                    d = snapshot().tail(input.top_n()).to_pandas().sort_values("ai_score", ascending=False)
-                    fig = px.bar(
-                        d, x="ai_score", y="occupation", orientation="h",
-                        color="ai_score", color_continuous_scale="RdYlGn",
-                        template="plotly_white",
-                        labels={"ai_score": input.ai_cap(), "occupation": ""},
-                        hover_data={"count": True},
-                    )
-                    fig.update_layout(coloraxis_showscale=False, margin=dict(t=10, l=10, b=30))
-                    return fig
-
-        with ui.card(full_screen=True):
-            ui.card_header("AI Capability Radar — Average Across Filtered Selection")
-            @render_plotly
-            def plot_radar():
-                d = filtered()
-                labels = list(AI_CAPS.keys())
-                cols = list(AI_CAPS.values())
-                means = [round(float(d[c].mean() or 0), 3) for c in cols]
-                fig = go.Figure(go.Scatterpolar(
-                    r=means + [means[0]],
-                    theta=labels + [labels[0]],
-                    fill="toself",
-                    fillcolor="rgba(76, 114, 176, 0.3)",
-                    line=dict(color="#4C72B0", width=2),
-                ))
-                fig.update_layout(
-                    polar=dict(radialaxis=dict(visible=True, showticklabels=True)),
-                    showlegend=False,
-                    template="plotly_white",
-                    margin=dict(t=30, b=30, l=60, r=60),
-                )
-                return fig
-
-    # ── Employment vs AI ───────────────────────────────────────────────────────
-    with ui.nav_panel("Employment vs AI"):
-
-        with ui.card(full_screen=True):
-            ui.card_header("AI Exposure vs 1-Year Employment Change (bubble size = employment)")
-            @render_plotly
-            def plot_scatter():
-                d = snapshot().drop_nulls(["ai_score", "pct_chg_1y"]).to_pandas()
-                fig = px.scatter(
-                    d, x="ai_score", y="pct_chg_1y",
-                    size="count", size_max=50,
-                    hover_name="occupation",
-                    hover_data={"count": ":,", "ai_score": ":.3f", "pct_chg_1y": ":.1f%"},
-                    color="pct_chg_1y",
-                    color_continuous_scale="RdYlGn",
-                    color_continuous_midpoint=0,
-                    template="plotly_white",
-                    labels={
-                        "ai_score": f"{input.ai_cap()} Score",
-                        "pct_chg_1y": "1-Year Employment Change (%)",
-                        "count": "Employed",
-                    },
-                )
-                fig.add_hline(y=0, line_dash="dash", line_color="grey", opacity=0.5)
-                fig.update_layout(coloraxis_showscale=False, margin=dict(t=10, b=30))
-                return fig
-
-        with ui.layout_columns(col_widths=[6, 6]):
-
-            with ui.card(full_screen=True):
-                ui.card_header("3-Year Employment Change Distribution by Exposure Level")
-                @render_plotly
-                def plot_box():
-                    cap_col = AI_CAPS[input.ai_cap()]
-                    level_col = cap_col.replace("_avg", "_Level_Exposure")
-                    d = filtered().drop_nulls([level_col, "pct_chg_3y"]).to_pandas()
-                    d[level_col] = d[level_col].astype(str)
-                    fig = px.box(
-                        d, x=level_col, y="pct_chg_3y",
-                        color=level_col,
-                        color_discrete_sequence=["#d73027", "#fc8d59", "#fee08b", "#91cf60", "#1a9850"],
-                        template="plotly_white",
-                        labels={level_col: "Exposure Level (1=Low → 5=High)",
-                                "pct_chg_3y": "3-Year Emp. Change (%)"},
-                    )
-                    fig.add_hline(y=0, line_dash="dash", line_color="grey", opacity=0.5)
-                    fig.update_layout(showlegend=False, margin=dict(t=10, b=30))
-                    return fig
-
-            with ui.card(full_screen=True):
-                ui.card_header("Avg 1-Year Employment Change by Age Group")
-                @render_plotly
-                def plot_age():
-                    d = (
-                        filtered()
-                        .group_by("age_group")
-                        .agg(pct_change_expr("chg_1y", "pct_chg_1y"))
-                        .sort("age_group")
-                        .to_pandas()
-                    )
-                    fig = px.bar(
-                        d, x="age_group", y="pct_chg_1y",
-                        color="pct_chg_1y",
-                        color_continuous_scale="RdYlGn",
-                        color_continuous_midpoint=0,
-                        template="plotly_white",
-                        labels={"age_group": "Age Group",
-                                "pct_chg_1y": "Avg 1-Year Change (%)"},
-                    )
-                    fig.add_hline(y=0, line_dash="dash", line_color="grey", opacity=0.5)
-                    fig.update_layout(
-                        coloraxis_showscale=False,
-                        margin=dict(t=10, b=60),
-                        xaxis_tickangle=-30,
-                    )
-                    return fig
-
-    # ── Time Trends ────────────────────────────────────────────────────────────
-    with ui.nav_panel("Time Trends"):
-
-        with ui.card(full_screen=True):
-            ui.card_header("AI Exposure Over Time — SSYK1 Major Occupation Groups")
-            @render_plotly
-            def plot_cap_trend():
-                cap_col = AI_CAPS[input.ai_cap()]
-                d = (
-                    filter_rows(level="SSYK1", year_range=input.year_range())
-                    .group_by("year", "occupation")
-                    .agg(pl.col(cap_col).mean().alias("ai_score"))
-                    .sort("year")
-                    .to_pandas()
-                )
-                fig = px.line(
-                    d, x="year", y="ai_score", color="occupation",
-                    markers=True, template="plotly_white",
-                    labels={"year": "Year", "ai_score": input.ai_cap(),
-                            "occupation": "Major Group"},
-                )
-                fig.update_xaxes(tickformat="d")
-                fig.update_layout(legend_title="", margin=dict(t=10, b=30))
-                return fig
-
-        with ui.layout_columns(col_widths=[6, 6]):
-
-            with ui.card(full_screen=True):
-                ui.card_header("Employment by Sex Over Time (Stacked Area)")
-                @render_plotly
-                def plot_area():
-                    d = (
-                        filtered()
-                        .group_by("year", "sex")
-                        .agg(pl.col("count").sum())
-                        .sort("year")
-                        .to_pandas()
-                    )
-                    fig = px.area(
-                        d, x="year", y="count", color="sex",
-                        color_discrete_map=SEX_COLORS,
-                        template="plotly_white",
-                        labels={"year": "Year", "count": "Employed Persons", "sex": "Sex"},
-                    )
-                    fig.update_xaxes(tickformat="d")
-                    fig.update_layout(legend_title="", margin=dict(t=10, b=30))
-                    return fig
-
-            with ui.card(full_screen=True):
-                ui.card_header("GenAI vs All-Apps Exposure Gap Over Time")
-                @render_plotly
-                def plot_gap():
-                    d = (
-                        filtered()
-                        .group_by("year")
-                        .agg(
-                            pl.col("daioe_genai_avg").mean().alias("GenAI"),
-                            pl.col("daioe_allapps_avg").mean().alias("All Apps"),
+                ui.card_header("Employment by Age Group")
+                with ui.layout_sidebar():
+                    with ui.sidebar(width="220px"):
+                        ui.input_slider(
+                            "chart_year_range",
+                            "Year range",
+                            min=min(YEARS),
+                            max=max(YEARS),
+                            value=(min(YEARS), max(YEARS)),
+                            step=1,
+                            sep="",
                         )
-                        .sort("year")
-                        .to_pandas()
-                    )
-                    fig = px.line(
-                        d.melt("year", var_name="Metric", value_name="Score"),
-                        x="year", y="Score", color="Metric",
-                        markers=True, template="plotly_white",
-                        labels={"year": "Year"},
-                    )
-                    fig.update_xaxes(tickformat="d")
-                    fig.update_layout(legend_title="", margin=dict(t=10, b=30))
-                    return fig
+                        ui.input_selectize(
+                            "chart_age_groups",
+                            "Age groups",
+                            choices=AGES,
+                            selected=AGES[:2],
+                            multiple=True,
+                        )
+                    @render_plotly
+                    def occ_age_chart():
+                        """Render a line chart of 1-yr employment % change per age group."""
+                        df = occ_employment_by_age()
+                        return visuals.build_age_chart(df.to_pandas(), input.occupation())
 
-    # ── Data Table ─────────────────────────────────────────────────────────────
-    with ui.nav_panel("Data"), ui.card(full_screen=True):
-        ui.card_header("Snapshot Data Table")
-        @render.data_frame
-        def data_table():
-            cap_label = input.ai_cap()
-            d = (
-                snapshot()
-                .rename({
-                    "count":      "Employed",
-                    "ai_score":   cap_label,
-                    "pct_chg_1y": "Chg 1Y (%)",
-                    "pct_chg_3y": "Chg 3Y (%)",
-                    "pct_chg_5y": "Chg 5Y (%)",
-                })
-                .to_pandas()
+                    ui.markdown(visuals.SCB_SOURCE_MD)
+
+            with ui.card():
+                "Card 4"
+
+    with ui.nav_panel(title="2. Comparison View"):
+        "Panel B content"
+
+    with ui.nav_panel(title="3. Download"):
+        ui.p(
+            "Export the filtered row-level dataset or inspect a compact preview before downloading.",
+            class_="text-muted mb-3",
+        )
+        with ui.div(class_="d-flex gap-3 align-items-end flex-wrap mb-3"):
+            ui.input_select(
+                "download_level",
+                "SSYK level",
+                choices={level: LEVEL_LABELS.get(level, level) for level in LEVELS},
+                selected=DEFAULT_LEVEL,
+                width="200px",
             )
-            return render.DataGrid(d, filters=True, height="600px", width="100%")
+            ui.input_slider(
+                "download_years",
+                "Year range",
+                min=YEAR_MIN,
+                max=YEAR_MAX,
+                value=(YEAR_MIN, YEAR_MAX),
+                step=1,
+                sep="",
+                width="220px",
+            )
+            ui.input_checkbox_group(
+                "download_sex",
+                "Sex",
+                choices={"men": "Men", "women": "Women"},
+                selected=SEXES,
+                inline=True,
+            )
+            ui.input_select(
+                "download_age",
+                "Age group",
+                choices={"All": "All ages"} | {a: a for a in AGES},
+                selected="All",
+                width="200px",
+            )
+            ui.input_selectize(
+                "download_occupation",
+                "Occupations",
+                choices=OCCUPATION_CHOICES[DEFAULT_LEVEL],
+                multiple=True,
+                options={"placeholder": "All occupations"},
+            )
+            ui.input_select(
+                "download_format",
+                "Format",
+                choices={"csv": "CSV", "parquet": "Parquet", "excel": "Excel"},
+                selected="csv",
+                width="120px",
+            )
+
+        with ui.layout_columns(col_widths=[3, 9]):
+            with ui.value_box(theme="primary"):
+                "Rows"
+
+                @render.text
+                def download_rows_count():
+                    """Show count of rows matching current download filters."""
+                    return f"{_download_frame().height:,}"
+
+            with ui.card():
+                ui.card_header("Export")
+
+                @render.download(
+                    filename=lambda: (
+                        "daioe_swedish_occupations_"
+                        f"{__import__('datetime').datetime.now().strftime('%Y-%m-%d')}."
+                        f"{download_extension(input.download_format())}"
+                    ),
+                    media_type=lambda: download_media_type(input.download_format()),
+                    label="Download filtered data",
+                )
+                def download_data():
+                    """Export filtered data in the selected format."""
+                    return export_filtered_data(
+                        _download_frame().to_pandas(),
+                        input.download_format(),
+                    )
+
+        with ui.card(full_screen=True):
+            ui.card_header("Preview (first 50 rows)")
+
+            @render.ui
+            def download_preview():
+                """Render a preview table of the filtered download data."""
+                cols = [
+                    "level", "ssyk_code", "occupation", "year", "sex",
+                    "age_group", "count", "daioe_genai_wavg",
+                    "daioe_allapps_wavg", "pct_chg_1y",
+                ]
+                data = _download_frame().select(cols).head(50).to_pandas()
+                return as_great_table_html(data, METRICS)
+
+
+@reactive.effect
+def _sync_occupation_choices():
+    """Update the occupation selectize choices whenever the SSYK level changes."""
+    level = input.occ_level()
+    choices = OCCUPATION_CHOICES[level]
+    ui.update_selectize("occupation", choices=choices, selected=next(iter(choices)))
+
+
+@reactive.effect
+def _sync_download_occupation_choices():
+    """Update the download occupation selectize when the download SSYK level changes."""
+    level = input.download_level()
+    ui.update_selectize("download_occupation", choices=OCCUPATION_CHOICES[level], selected=[])

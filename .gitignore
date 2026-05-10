@@ -7,7 +7,7 @@ wheels/
 *.egg-info
 
 # Local development environments
-.venv
+.venv/
 .claude/
 .ruff_cache/
 
