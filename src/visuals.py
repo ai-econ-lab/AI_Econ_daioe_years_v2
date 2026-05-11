@@ -138,21 +138,32 @@ def build_age_chart(df: pd.DataFrame, occupation: str) -> go.Figure:
 
 
 def build_comparison_employment_plot(df: pd.DataFrame) -> go.Figure:
-    """Build a line chart comparing employment trends across selected occupations."""
+    """Build a line chart comparing 1-yr employment % change across selected occupations."""
     if df.empty:
         return go.Figure()
 
     fig = px.line(
         df,
         x="year",
-        y="count",
+        y="pct_chg_1y",
         color="occupation",
         markers=True,
-        labels={"count": "Total Employment", "year": "Year"},
+        custom_data=["count"],
+        labels={"pct_chg_1y": "Employment Change (%)", "year": "Year"},
     )
+    fig.update_traces(
+        hovertemplate=(
+            "<b>%{fullData.name}</b><br>"
+            "Year: %{x}<br>"
+            "Change: %{y:.1f}%<br>"
+            "Employment: %{customdata[0]:,}<extra></extra>"
+        ),
+    )
+    fig.add_hline(y=0, line_color="grey", line_width=1)
     fig.update_layout(
         **_BASE_LAYOUT,
         legend={"orientation": "h", "yanchor": "bottom", "y": -0.25, "xanchor": "center", "x": 0.5, "title": None},
+        yaxis={"ticksuffix": "%"},
     )
     fig.update_xaxes(gridcolor=_C_GRID, zeroline=False, dtick=1)
     fig.update_yaxes(gridcolor=_C_GRID, zeroline=False)
