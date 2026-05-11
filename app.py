@@ -19,7 +19,6 @@ from src.setup import (
     build_choices_by_level,
     download_extension,
     download_media_type,
-    empty_figure,
     export_filtered_data,
     lf,
 )
@@ -82,8 +81,7 @@ def comparison_data():
     """Return total employment per year/occupation for the comparison view."""
     occs = list(input.comp_occs())
     ages = list(input.comp_age())
-    if not occs or not ages:
-        return pl.DataFrame()
+    req(occs, ages)
     return calcs.get_comparison_employment(lf, occs, ages)
 
 
@@ -91,8 +89,7 @@ def comparison_data():
 def comp_radar_data():
     """Return mean AI percentile scores per occupation for the radar chart."""
     occs = list(input.comp_occs())
-    if not occs:
-        return pl.DataFrame()
+    req(occs)
     return calcs.get_comp_radar(lf, occs, int(input.comp_year()))
 
 
@@ -203,8 +200,6 @@ with ui.navset_pill(id="tab"):
                 @render.ui
                 def comparison_summary():
                     df = comparison_data()
-                    if df.is_empty():
-                        return ui.markdown("*Select occupations to generate a summary...*")
 
                     latest_yr = df["year"].max()
                     summary_rows = []
@@ -243,24 +238,18 @@ with ui.navset_pill(id="tab"):
 
             with ui.layout_columns(col_widths=[6, 6], gap="1rem"):
                 with ui.card(full_screen=True):
-                    ui.card_header("Employment Trends (Selected Occupations)")
+                    ui.card_header("Annual Employment Change (Selected Occupations)")
 
                     @render_plotly
                     def comparison_employment_plot():
-                        df = comparison_data()
-                        if df.is_empty():
-                            return empty_figure("Select occupations to compare", {"text": "#666"})
-                        return visuals.build_comparison_employment_plot(df.to_pandas())
+                        return visuals.build_comparison_employment_plot(comparison_data().to_pandas())
 
                 with ui.card(full_screen=True):
                     ui.card_header("Radar Comparison (AI Exposure Percentiles)")
 
                     @render_plotly
                     def comp_radar_plot():
-                        df = comp_radar_data()
-                        if df.is_empty():
-                            return empty_figure("Select occupations to compare", {"text": "#666"})
-                        return visuals.build_comp_radar_plot(df.to_pandas(), METRICS)
+                        return visuals.build_comp_radar_plot(comp_radar_data().to_pandas(), METRICS)
 
     with ui.nav_panel(title="3. Download"):
         ui.p(
