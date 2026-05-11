@@ -17,7 +17,7 @@ An interactive Shiny app for exploring AI exposure and employment trends across 
 - **Occupation View**: Select an occupation by SSYK level and year to see employment statistics and % changes (1, 3, 5-year)
 - **AI Exposure**: Ranked bar chart of AI sub-domain exposure scores with percentile rankings and exposure levels
 - **Employment by Age Group**: Line chart of annual employment % change by age group over a custom year range
-- **Comparison View**: Benchmark multiple occupations side by side with an employment trend chart, summary table, and AI exposure radar chart
+- **Comparison View**: Benchmark multiple occupations side by side with an annual employment % change chart, summary table, and AI exposure radar chart
 - **Download**: Filter and export the full dataset as CSV, Parquet, or Excel
 
 ## Data Sources

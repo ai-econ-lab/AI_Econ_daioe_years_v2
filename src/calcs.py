@@ -139,7 +139,10 @@ def get_comparison_employment(
             & pl.col("age_group").is_in(age_groups),
         )
         .group_by(["year", "occupation"])
-        .agg(pl.col("count").sum())
+        .agg([
+            pl.col("count").sum(),
+            pl.col("pct_chg_1y").mean(),
+        ])
         .sort(["occupation", "year"])
         .collect()
     )
