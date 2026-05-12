@@ -193,7 +193,7 @@ def build_comp_radar_plot(df: pd.DataFrame, metrics: dict[str, str]) -> go.Figur
 
     fig.update_layout(
         **_BASE_LAYOUT,
-        polar={"radialaxis": {"visible": True, "range": [0, 100]}},
+        polar={"bgcolor": _C_BG, "radialaxis": {"visible": True, "range": [0, 100]}},
         showlegend=True,
         legend={"orientation": "h", "yanchor": "bottom", "y": -0.25, "xanchor": "center", "x": 0.5},
     )
@@ -249,3 +249,12 @@ def build_ai_exposure_bar(df: pd.DataFrame, occupation: str, year: int) -> go.Fi
     fig.update_xaxes(gridcolor=_C_GRID, zeroline=False)
     fig.update_yaxes(gridcolor=_C_GRID, zeroline=False)
     return fig
+
+
+def export_fig(fig: go.Figure, width: int = 1000, height: int = 650) -> bytes:
+    """Return PNG bytes of a figure with a solid white background."""
+    is_polar = any(getattr(t, "type", "") == "scatterpolar" for t in fig.data)
+    fig.update_layout(paper_bgcolor="white", plot_bgcolor="white")
+    if is_polar:
+        fig.update_layout(polar_bgcolor="white")
+    return fig.to_image(format="png", scale=2, width=width, height=height)
