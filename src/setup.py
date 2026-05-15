@@ -89,7 +89,7 @@ METRICS: dict[str, str] = {
     "daioe_allapps": "📚 All Applications",
     "daioe_stratgames": "♟️ Strategy Games",
     "daioe_videogames": "🎮 Video Games (Real-Time)",
-    "daioe_imgrec": "🖼️🔎 Image Recognition",
+    "daioe_imgrec": "📽️🔎 Image Recognition",
     "daioe_imgcompr": "🧩🖼️ Image Comprehension",
     "daioe_imggen": "🖌️🖼️ Image Generation",
     "daioe_readcompr": "📖 Reading Comprehension",
