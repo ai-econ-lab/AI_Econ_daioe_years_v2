@@ -51,7 +51,7 @@ AI_LABELS = {
     "daioe_allapps_wavg": "📚 All Applications",
     "daioe_stratgames_wavg": "♟️ Strategy Games",
     "daioe_videogames_wavg": "🎮 Video Games",
-    "daioe_imgrec_wavg": "🖼️ Image Recognition",
+    "daioe_imgrec_wavg": "📽️ Image Recognition",
     "daioe_imgcompr_wavg": "🧩 Image Comprehension",
     "daioe_imggen_wavg": "🎨 Image Generation",
     "daioe_readcompr_wavg": "📖 Reading Comprehension",
@@ -68,7 +68,9 @@ EXPOSURE_LABELS = {1: "Very Low", 2: "Low", 3: "Medium", 4: "High", 5: "Very Hig
 
 
 def get_occ_ai_exposure(
-    lf: pl.LazyFrame, occupation: str, year: int,
+    lf: pl.LazyFrame,
+    occupation: str,
+    year: int,
 ) -> pl.DataFrame:
     """
     Return mean weighted AI exposure scores, exposure levels, and percentile ranks per sub-domain.
@@ -86,21 +88,29 @@ def get_occ_ai_exposure(
     )
 
     rows = []
-    for wavg_col, level_col, pctl_col in zip(AI_WAVG_COLS, AI_LEVEL_COLS, AI_PCTL_COLS, strict=False):
+    for wavg_col, level_col, pctl_col in zip(
+        AI_WAVG_COLS, AI_LEVEL_COLS, AI_PCTL_COLS, strict=False
+    ):
         raw_level = df[level_col].mean()
         level_val = round(raw_level) if raw_level is not None else None
-        rows.append({
-            "domain": AI_LABELS[wavg_col],
-            "score": df[wavg_col].mean(),
-            "level": level_val,
-            "level_label": EXPOSURE_LABELS.get(level_val, "Unknown") if level_val else "Unknown",
-            "percentile": df[pctl_col].mean(),
-        })
+        rows.append(
+            {
+                "domain": AI_LABELS[wavg_col],
+                "score": df[wavg_col].mean(),
+                "level": level_val,
+                "level_label": EXPOSURE_LABELS.get(level_val, "Unknown")
+                if level_val
+                else "Unknown",
+                "percentile": df[pctl_col].mean(),
+            }
+        )
     return pl.DataFrame(rows).sort("score")
 
 
 def get_occ_ai_trend(
-    lf: pl.LazyFrame, occupation: str, year_range: tuple[int, int],
+    lf: pl.LazyFrame,
+    occupation: str,
+    year_range: tuple[int, int],
 ) -> pl.DataFrame:
     """
     Return yearly mean weighted AI exposure (All Applications) for one occupation over a year range.
@@ -139,10 +149,12 @@ def get_comparison_employment(
             & pl.col("age_group").is_in(age_groups),
         )
         .group_by(["year", "occupation"])
-        .agg([
-            pl.col("count").sum(),
-            pl.col("pct_chg_1y").mean(),
-        ])
+        .agg(
+            [
+                pl.col("count").sum(),
+                pl.col("pct_chg_1y").mean(),
+            ]
+        )
         .sort(["occupation", "year"])
         .collect()
     )
@@ -160,8 +172,7 @@ def get_comp_radar(
     """
     return (
         lf.filter(
-            pl.col("occupation").is_in(occupations)
-            & (pl.col("year") == year),
+            pl.col("occupation").is_in(occupations) & (pl.col("year") == year),
         )
         .group_by("occupation")
         .agg([pl.col(c).mean() for c in AI_PCTL_COLS])
@@ -190,10 +201,12 @@ def get_occ_employment_by_age(
             & (pl.col("age_group").is_in(age_groups)),
         )
         .group_by(["year", "age_group"])
-        .agg([
-            pl.col("count").sum(),
-            pl.col("pct_chg_1y").mean(),
-        ])
+        .agg(
+            [
+                pl.col("count").sum(),
+                pl.col("pct_chg_1y").mean(),
+            ]
+        )
         .sort(["age_group", "year"])
         .collect()
     )
