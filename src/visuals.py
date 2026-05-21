@@ -16,13 +16,13 @@ DAIOE_SOURCE_MD = "Source: [DAIOEs](https://www.ai-econlab.com/ai-exposure-daioe
 # Brand colours from _brand.yml
 _C_BG = "rgba(0,0,0,0)"
 _C_GRID = "#E5E5E5"
-_C_TEXT = "#1C2826"  # black
-_C_TITLE = "#0C0A3E"  # primary / blue
+_C_TEXT = "#1C2826"
+_C_TITLE = "#0C0A3E"
 
 _FONT_BASE = "Nunito Sans"
 _FONT_HEAD = "Montserrat"
 
-_BASE_LAYOUT = {
+_BASE_LAYOUT: dict = {
     "paper_bgcolor": _C_BG,
     "plot_bgcolor": _C_BG,
     "font": {"family": _FONT_BASE, "color": _C_TEXT, "size": 13},
@@ -30,6 +30,29 @@ _BASE_LAYOUT = {
     "hoverlabel": {"font": {"family": _FONT_BASE, "size": 12}},
     "margin": {"l": 20, "r": 20, "t": 45, "b": 20},
 }
+
+
+def apply_plot_style(fig: go.Figure, brand: dict[str, str]) -> go.Figure:
+    """Apply consistent visual style to a Plotly figure."""
+    fig.update_layout(
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        font={"family": _FONT_BASE, "color": brand["text"]},
+        hoverlabel={"bgcolor": "white", "font_size": 12},
+        margin={"l": 20, "r": 20, "t": 40, "b": 20},
+    )
+    fig.update_xaxes(gridcolor=_C_GRID, zeroline=False)
+    fig.update_yaxes(gridcolor=_C_GRID, zeroline=False)
+    return fig
+
+
+def empty_figure(message: str, brand: dict[str, str]) -> go.Figure:
+    """Return a styled empty Plotly figure with a centred message."""
+    fig = go.Figure()
+    fig.add_annotation(text=message, showarrow=False, font_size=16)
+    fig.update_xaxes(visible=False)
+    fig.update_yaxes(visible=False)
+    return apply_plot_style(fig, brand)
 
 
 def build_value_boxes(summary: dict, occupation: str) -> ui.Tag:
@@ -40,16 +63,16 @@ def build_value_boxes(summary: dict, occupation: str) -> ui.Tag:
     change), and a markdown source note.
     """
 
-    def _arrow(v):
+    def _arrow(v: float) -> str:
         return "▼" if v < 0 else "▲"
 
-    def _theme(v):
+    def _theme(v: float) -> str:
         return "danger" if v < 0 else "success"
 
-    def _fmt_pct(v):
+    def _fmt_pct(v: float | None) -> str:
         return f"{_arrow(v)} {v:.0f}%" if v is not None else "N/A"
 
-    def _fmt_theme(v):
+    def _fmt_theme(v: float | None) -> str:
         return _theme(v) if v is not None else "secondary"
 
     emp = summary["employment"]
@@ -70,19 +93,31 @@ def build_value_boxes(summary: dict, occupation: str) -> ui.Tag:
             ui.value_box(
                 title="1-yr change",
                 value=_fmt_pct(pct1),
-                showcase=fa.icon_svg("arrow-trend-up" if pct1 is None or pct1 >= 0 else "arrow-trend-down"),
+                showcase=fa.icon_svg(
+                    "arrow-trend-up"
+                    if pct1 is None or pct1 >= 0
+                    else "arrow-trend-down"
+                ),
                 theme=_fmt_theme(pct1),
             ),
             ui.value_box(
                 title="3-yr change",
                 value=_fmt_pct(pct3),
-                showcase=fa.icon_svg("arrow-trend-up" if pct3 is None or pct3 >= 0 else "arrow-trend-down"),
+                showcase=fa.icon_svg(
+                    "arrow-trend-up"
+                    if pct3 is None or pct3 >= 0
+                    else "arrow-trend-down"
+                ),
                 theme=_fmt_theme(pct3),
             ),
             ui.value_box(
                 title="5-yr change",
                 value=_fmt_pct(pct5),
-                showcase=fa.icon_svg("arrow-trend-up" if pct5 is None or pct5 >= 0 else "arrow-trend-down"),
+                showcase=fa.icon_svg(
+                    "arrow-trend-up"
+                    if pct5 is None or pct5 >= 0
+                    else "arrow-trend-down"
+                ),
                 theme=_fmt_theme(pct5),
             ),
             col_widths=[3, 3, 3, 3],
@@ -162,7 +197,14 @@ def build_comparison_employment_plot(df: pd.DataFrame) -> go.Figure:
     fig.add_hline(y=0, line_color="grey", line_width=1)
     fig.update_layout(
         **_BASE_LAYOUT,
-        legend={"orientation": "h", "yanchor": "bottom", "y": -0.25, "xanchor": "center", "x": 0.5, "title": None},
+        legend={
+            "orientation": "h",
+            "yanchor": "bottom",
+            "y": -0.25,
+            "xanchor": "center",
+            "x": 0.5,
+            "title": None,
+        },
         yaxis={"ticksuffix": "%"},
     )
     fig.update_xaxes(gridcolor=_C_GRID, zeroline=False, dtick=1)
@@ -183,30 +225,36 @@ def build_comp_radar_plot(df: pd.DataFrame, metrics: dict[str, str]) -> go.Figur
         r_values_closed = [*r_values, r_values[0]]
         categories_closed = [*categories, categories[0]]
 
-        fig.add_trace(go.Scatterpolar(
-            r=r_values_closed,
-            theta=categories_closed,
-            fill="toself",
-            name=row["occupation"],
-            hovertemplate="%{theta}: %{r:.1f}%<extra></extra>",
-        ))
+        fig.add_trace(
+            go.Scatterpolar(
+                r=r_values_closed,
+                theta=categories_closed,
+                fill="toself",
+                name=row["occupation"],
+                hovertemplate="%{theta}: %{r:.1f}%<extra></extra>",
+            )
+        )
 
     fig.update_layout(
         **_BASE_LAYOUT,
         polar={"bgcolor": _C_BG, "radialaxis": {"visible": True, "range": [0, 100]}},
         showlegend=True,
-        legend={"orientation": "h", "yanchor": "bottom", "y": -0.25, "xanchor": "center", "x": 0.5},
+        legend={
+            "orientation": "h",
+            "yanchor": "bottom",
+            "y": -0.25,
+            "xanchor": "center",
+            "x": 0.5,
+        },
     )
     return fig
 
 
 def build_ai_exposure_bar(df: pd.DataFrame, occupation: str, year: int) -> go.Figure:
     """
-    Build a vertical bar chart of AI exposure level per sub-domain.
+    Build a horizontal bar chart of AI exposure level per sub-domain.
 
-    X-axis: AI sub-domains with emoji labels.
-    Y-axis: exposure level (1=Low, 2=Medium, 3=High).
-    Bar colour intensity driven by the weighted average score.
+    Bar colour intensity is driven by the percentile rank score.
     Hover shows exposure level label, index score, and percentile rank.
     """
     if df.empty:
@@ -226,7 +274,7 @@ def build_ai_exposure_bar(df: pd.DataFrame, occupation: str, year: int) -> go.Fi
                 "cmax": 100,
             },
             customdata=list(
-                zip(df["level_label"], df["level"], df["score"], strict=False)
+                zip(df["level_label"], df["level"], df["score"], strict=False),
             ),
             hovertemplate=(
                 "<b>%{y}</b><br>"
