@@ -17,3 +17,9 @@ dependencies = [
     "shiny[theme]>=1.6.1",
     "shinywidgets>=0.8.1",
 ]
+
+[tool.ruff.lint]
+ignore = [
+    "A004",   # Shiny Express intentionally shadows the `input` builtin
+    "SIM117", # Shiny UI DSL requires nested `with` blocks; cannot be flattened
+]

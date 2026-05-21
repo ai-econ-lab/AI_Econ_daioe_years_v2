@@ -1,5 +1,13 @@
 import polars as pl
 
+from .constants import (
+    AI_LABELS,
+    AI_LEVEL_COLS,
+    AI_PCTL_COLS,
+    AI_WAVG_COLS,
+    EXPOSURE_LABELS,
+)
+
 
 def get_occ_summary(lf: pl.LazyFrame, occupation: str, year: int) -> dict | None:
     """
@@ -32,41 +40,6 @@ def get_occ_summary(lf: pl.LazyFrame, occupation: str, year: int) -> dict | None
     }
 
 
-AI_WAVG_COLS = [
-    "daioe_genai_wavg",
-    "daioe_allapps_wavg",
-    "daioe_stratgames_wavg",
-    "daioe_videogames_wavg",
-    "daioe_imgrec_wavg",
-    "daioe_imgcompr_wavg",
-    "daioe_imggen_wavg",
-    "daioe_readcompr_wavg",
-    "daioe_lngmod_wavg",
-    "daioe_translat_wavg",
-    "daioe_speechrec_wavg",
-]
-
-AI_LABELS = {
-    "daioe_genai_wavg": "🧠 Generative AI",
-    "daioe_allapps_wavg": "📚 All Applications",
-    "daioe_stratgames_wavg": "♟️ Strategy Games",
-    "daioe_videogames_wavg": "🎮 Video Games",
-    "daioe_imgrec_wavg": "📽️ Image Recognition",
-    "daioe_imgcompr_wavg": "🧩 Image Comprehension",
-    "daioe_imggen_wavg": "🎨 Image Generation",
-    "daioe_readcompr_wavg": "📖 Reading Comprehension",
-    "daioe_lngmod_wavg": "✍️ Language Modeling",
-    "daioe_translat_wavg": "🌐 Translation",
-    "daioe_speechrec_wavg": "🎙️ Speech Recognition",
-}
-
-
-AI_LEVEL_COLS = [c.replace("_wavg", "_Level_Exposure") for c in AI_WAVG_COLS]
-AI_PCTL_COLS = [f"pctl_{c}" for c in AI_WAVG_COLS]
-
-EXPOSURE_LABELS = {1: "Very Low", 2: "Low", 3: "Medium", 4: "High", 5: "Very High"}
-
-
 def get_occ_ai_exposure(
     lf: pl.LazyFrame,
     occupation: str,
@@ -89,7 +62,10 @@ def get_occ_ai_exposure(
 
     rows = []
     for wavg_col, level_col, pctl_col in zip(
-        AI_WAVG_COLS, AI_LEVEL_COLS, AI_PCTL_COLS, strict=False
+        AI_WAVG_COLS,
+        AI_LEVEL_COLS,
+        AI_PCTL_COLS,
+        strict=False,
     ):
         raw_level = df[level_col].mean()
         level_val = round(raw_level) if raw_level is not None else None
@@ -102,7 +78,7 @@ def get_occ_ai_exposure(
                 if level_val
                 else "Unknown",
                 "percentile": df[pctl_col].mean(),
-            }
+            },
         )
     return pl.DataFrame(rows).sort("score")
 
@@ -116,7 +92,6 @@ def get_occ_ai_trend(
     Return yearly mean weighted AI exposure (All Applications) for one occupation over a year range.
 
     Returns a DataFrame with columns: year, daioe_allapps_wavg.
-    Used to power the trend line in Card 2.
     """
     year_min, year_max = year_range
     return (
@@ -153,7 +128,7 @@ def get_comparison_employment(
             [
                 pl.col("count").sum(),
                 pl.col("pct_chg_1y").mean(),
-            ]
+            ],
         )
         .sort(["occupation", "year"])
         .collect()
@@ -189,7 +164,6 @@ def get_occ_employment_by_age(
     """
     Return yearly employment counts per age group for a given occupation and year range.
 
-    Used to power the employment change line chart in Card 3.
     Returns a long-format DataFrame with columns: year, age_group, count.
     """
     year_min, year_max = year_range
@@ -205,7 +179,7 @@ def get_occ_employment_by_age(
             [
                 pl.col("count").sum(),
                 pl.col("pct_chg_1y").mean(),
-            ]
+            ],
         )
         .sort(["age_group", "year"])
         .collect()
