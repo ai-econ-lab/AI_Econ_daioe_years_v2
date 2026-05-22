@@ -411,12 +411,25 @@ with ui.navset_pill(id="tab"):
                     choices={"csv": "CSV", "parquet": "Parquet", "excel": "Excel"},
                     selected="csv",
                 )
+                ui.hr()
 
-            ui.p(
-                "Export the filtered row-level dataset or inspect a compact preview before downloading.",
-                class_="text-muted mb-3",
-            )
-            with ui.layout_columns(col_widths=[3, 9]):
+                @render.download(
+                    filename=lambda: (
+                        "daioe_swedish_occupations_"
+                        f"{__import__('datetime').datetime.now().strftime('%Y-%m-%d')}."
+                        f"{download_extension(input.download_format())}"
+                    ),
+                    media_type=lambda: download_media_type(input.download_format()),
+                    label="Download",
+                )
+                def download_data():
+                    """Export filtered data in the selected format."""
+                    yield export_filtered_data(
+                        _download_frame().to_pandas(),
+                        input.download_format(),
+                    )
+
+            with ui.layout_columns(col_widths=[6, 6]):
                 with ui.value_box(theme="primary"):
                     "Rows"
 
@@ -425,27 +438,16 @@ with ui.navset_pill(id="tab"):
                         """Show count of rows matching current download filters."""
                         return f"{_download_frame().height:,}"
 
-                with ui.card():
-                    ui.card_header("Export")
+                with ui.value_box(theme="primary"):
+                    "Columns"
 
-                    @render.download(
-                        filename=lambda: (
-                            "daioe_swedish_occupations_"
-                            f"{__import__('datetime').datetime.now().strftime('%Y-%m-%d')}."
-                            f"{download_extension(input.download_format())}"
-                        ),
-                        media_type=lambda: download_media_type(input.download_format()),
-                        label="Download filtered data",
-                    )
-                    def download_data():
-                        """Export filtered data in the selected format."""
-                        yield export_filtered_data(
-                            _download_frame().to_pandas(),
-                            input.download_format(),
-                        )
+                    @render.text
+                    def download_cols_count():
+                        """Show count of columns in the download frame."""
+                        return f"{_download_frame().width:,}"
 
             with ui.card(full_screen=True):
-                ui.card_header("Preview (first 50 rows)")
+                ui.card_header("Data Preview (first 50 rows)")
 
                 @render.ui
                 def download_preview():
