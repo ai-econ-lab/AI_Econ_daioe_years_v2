@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import faicons as fa
+import pandas as pd
 import polars as pl
 from shiny import reactive, req
 from shiny.express import app_opts, input, render, ui
@@ -284,42 +285,29 @@ with ui.navset_pill(id="tab"):
                     df = comparison_data()
 
                     latest_yr = df["year"].max()
-                    summary_rows = []
+                    rows = []
                     for occ in df["occupation"].unique():
                         sub = df.filter(pl.col("occupation") == occ).sort("year")
-                        curr_emp = sub.tail(1)["count"][0]
 
                         def _val(yr, _sub=sub):
                             s = _sub.filter(pl.col("year") == yr)["count"]
-                            return f"{int(s[0]):,}" if not s.is_empty() else "---"
+                            return int(s[0]) if not s.is_empty() else None
 
-                        summary_rows.append(
-                            ui.tags.tr(
-                                ui.tags.td(occ, style="font-weight: bold;"),
-                                ui.tags.td(_val(latest_yr - 5)),
-                                ui.tags.td(_val(latest_yr - 3)),
-                                ui.tags.td(_val(latest_yr - 1)),
-                                ui.tags.td(
-                                    f"{int(curr_emp):,}",
-                                    style="background-color: #f8f9fa; font-weight: bold;",
-                                ),
-                            ),
+                        rows.append(
+                            {
+                                "Occupation": occ,
+                                f"Emp ({latest_yr - 5})": _val(latest_yr - 5),
+                                f"Emp ({latest_yr - 3})": _val(latest_yr - 3),
+                                f"Emp ({latest_yr - 1})": _val(latest_yr - 1),
+                                f"Emp ({latest_yr})": _val(latest_yr),
+                            }
                         )
 
-                    return ui.tags.table(
-                        ui.tags.thead(
-                            ui.tags.tr(
-                                ui.tags.th("Occupation"),
-                                ui.tags.th(f"Emp ({latest_yr - 5})"),
-                                ui.tags.th(f"Emp ({latest_yr - 3})"),
-                                ui.tags.th(f"Emp ({latest_yr - 1})"),
-                                ui.tags.th(f"Emp ({latest_yr})"),
-                            ),
-                        ),
-                        ui.tags.tbody(*summary_rows),
-                        class_="table table-sm table-hover",
-                        style="font-size: 0.9rem;",
-                    )
+                    summary_df = pd.DataFrame(rows)
+                    emp_cols = [c for c in summary_df.columns if c != "Occupation"]
+                    for col in emp_cols:
+                        summary_df[col] = summary_df[col].astype("Int64")
+                    return as_great_table_html(summary_df, METRICS)
 
             with ui.layout_columns(col_widths=[12, 12]):
                 with ui.card(full_screen=True, height="700px"):
