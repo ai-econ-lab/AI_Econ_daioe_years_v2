@@ -31,6 +31,7 @@ COPY data ./data
 COPY logos ./logos
 COPY md_files ./md_files
 COPY _brand.yml ./_brand.yml
+COPY README.md ./README.md
 
 # Requirement for deployment at hf
 EXPOSE 7860
