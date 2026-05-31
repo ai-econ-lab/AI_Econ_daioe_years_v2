@@ -32,35 +32,20 @@ _BASE_LAYOUT: dict = {
 }
 
 
-def apply_plot_style(fig: go.Figure, brand: dict[str, str]) -> go.Figure:
-    """Apply consistent visual style to a Plotly figure."""
-    fig.update_layout(
-        paper_bgcolor="rgba(0,0,0,0)",
-        plot_bgcolor="rgba(0,0,0,0)",
-        font={"family": _FONT_BASE, "color": brand["text"]},
-        hoverlabel={"bgcolor": "white", "font_size": 12},
-        margin={"l": 20, "r": 20, "t": 40, "b": 20},
-    )
-    fig.update_xaxes(gridcolor=_C_GRID, zeroline=False)
-    fig.update_yaxes(gridcolor=_C_GRID, zeroline=False)
-    return fig
-
-
-def empty_figure(message: str, brand: dict[str, str]) -> go.Figure:
-    """Return a styled empty Plotly figure with a centred message."""
-    fig = go.Figure()
-    fig.add_annotation(text=message, showarrow=False, font_size=16)
-    fig.update_xaxes(visible=False)
-    fig.update_yaxes(visible=False)
-    return apply_plot_style(fig, brand)
+def _nullify(df: pd.DataFrame, cols: list[str]) -> pd.DataFrame:
+    """Replace NaN with Python None in specified columns so Plotly serialises them as JSON null."""
+    for col in cols:
+        if col in df.columns:
+            df[col] = df[col].astype(object).where(pd.notna(df[col]), None)
+    return df
 
 
 def build_value_boxes(summary: dict, occupation: str) -> ui.Tag:
     """
     Build the employment summary value boxes for a given occupation.
 
-    Returns a div containing a heading, four value boxes (employment, 1/3/5-yr
-    change), and a markdown source note.
+    Returns a div containing a heading, four value boxes (employment, 1/3/5-yr change),
+    and a markdown source note.
     """
 
     def _arrow(v: float) -> str:
@@ -82,7 +67,10 @@ def build_value_boxes(summary: dict, occupation: str) -> ui.Tag:
     year = summary["year"]
 
     return ui.div(
-        ui.h6(f"National Employment of {occupation}", class_="mt-3 mb-2 fw-semibold"),
+        ui.h6(
+            f"National Employment of {occupation} (All Ages & Sexes)",
+            class_="mt-3 mb-2 fw-semibold",
+        ),
         ui.layout_columns(
             ui.value_box(
                 title="Employment",
@@ -96,7 +84,7 @@ def build_value_boxes(summary: dict, occupation: str) -> ui.Tag:
                 showcase=fa.icon_svg(
                     "arrow-trend-up"
                     if pct1 is None or pct1 >= 0
-                    else "arrow-trend-down"
+                    else "arrow-trend-down",
                 ),
                 theme=_fmt_theme(pct1),
             ),
@@ -106,7 +94,7 @@ def build_value_boxes(summary: dict, occupation: str) -> ui.Tag:
                 showcase=fa.icon_svg(
                     "arrow-trend-up"
                     if pct3 is None or pct3 >= 0
-                    else "arrow-trend-down"
+                    else "arrow-trend-down",
                 ),
                 theme=_fmt_theme(pct3),
             ),
@@ -116,13 +104,136 @@ def build_value_boxes(summary: dict, occupation: str) -> ui.Tag:
                 showcase=fa.icon_svg(
                     "arrow-trend-up"
                     if pct5 is None or pct5 >= 0
-                    else "arrow-trend-down"
+                    else "arrow-trend-down",
                 ),
                 theme=_fmt_theme(pct5),
             ),
             col_widths=[3, 3, 3, 3],
         ),
-        ui.markdown(f"Data as at **{year}**.\n\n{SCB_SOURCE_MD}"),
+        ui.markdown(f"Employment as at **{year}**.\n\n{SCB_SOURCE_MD}"),
+    )
+
+
+def _ticker_chip(label: str, value: str, tone: str = "neutral") -> ui.Tag:
+    return ui.span(
+        ui.span(label, class_="ticker-label"),
+        ui.span(value, class_="ticker-value"),
+        class_=f"ticker-chip ticker-chip-{tone}",
+    )
+
+
+def _ticker_pct_tone(v: float | None) -> str:
+    if v is None or pd.isna(v):
+        return "neutral"
+    return "up" if v >= 0 else "down"
+
+
+def _ticker_fmt_pct(v: float | None) -> str:
+    if v is None or pd.isna(v):
+        return "N/A"
+    sign = "+" if v > 0 else ""
+    return f"{sign}{v:.1f}%"
+
+
+def _ticker_fmt_percentile(v: float | None) -> str:
+    if v is None or pd.isna(v):
+        return "N/A"
+    return f"{v:,.0f}th percentile"
+
+
+def _occ_chips(
+    row: pd.Series,
+    ai_rows: pd.DataFrame,
+    year: int,
+) -> list[ui.Tag]:
+    """Build the chip list for one occupation row in the yearly ribbon."""
+    occ = row["occupation"]
+    emp = row["count"]
+    emp_str = f"{emp:,.0f}" if emp is not None and not pd.isna(emp) else "N/A"
+
+    chips: list[ui.Tag] = [
+        _ticker_chip("Occupation", occ),
+        _ticker_chip("Employment", emp_str),
+        _ticker_chip(
+            "1-yr change",
+            _ticker_fmt_pct(row["pct_chg_1y"]),
+            _ticker_pct_tone(row["pct_chg_1y"]),
+        ),
+        _ticker_chip(
+            "3-yr change",
+            _ticker_fmt_pct(row["pct_chg_3y"]),
+            _ticker_pct_tone(row["pct_chg_3y"]),
+        ),
+        _ticker_chip(
+            "5-yr change",
+            _ticker_fmt_pct(row["pct_chg_5y"]),
+            _ticker_pct_tone(row["pct_chg_5y"]),
+        ),
+        _ticker_chip("Year", str(year)),
+    ]
+    for _, ai_row in ai_rows.iterrows():
+        chips.append(
+            _ticker_chip(
+                str(ai_row["domain"]),
+                _ticker_fmt_percentile(ai_row["percentile"]),
+            ),
+        )
+    return chips
+
+
+# Approximate pixel width of one occupation's chip group (17 chips × ~180 px + separator).
+# Used to derive a duration that keeps scroll speed constant across SSYK levels.
+_PX_PER_OCC: int = 3_200
+_SCROLL_SPEED_PX_S: int = 80  # pixels per second
+
+
+def build_occupation_ribbon(
+    summary_df: pd.DataFrame,
+    ai_df: pd.DataFrame,
+    year: int,
+) -> ui.Tag:
+    """
+    Build a continuously scrolling ribbon showing all occupations at the selected SSYK level.
+
+    summary_df: columns occupation, count, pct_chg_1y, pct_chg_3y, pct_chg_5y (one row per occ).
+    ai_df: columns occupation, domain, percentile (long format, sorted by percentile desc).
+
+    The animation duration is computed from the number of occupations so that the scroll
+    speed stays constant regardless of SSYK level.
+    """
+    ai_by_occ: dict[str, pd.DataFrame] = (
+        {occ: grp for occ, grp in ai_df.groupby("occupation", sort=False)}  # noqa: C416
+        if not ai_df.empty
+        else {}
+    )
+
+    sep = ui.span("·", class_="ticker-sep")
+    items: list[ui.Tag] = []
+    for _, row in summary_df.iterrows():
+        if items:
+            items.append(sep)
+        items.extend(
+            _occ_chips(row, ai_by_occ.get(row["occupation"], pd.DataFrame()), year),
+        )
+
+    if not items:
+        return ui.div()
+
+    n_occs = len(summary_df)
+    duration = max(60, n_occs * _PX_PER_OCC // _SCROLL_SPEED_PX_S)
+
+    content = ui.div(*items, class_="ticker-content")
+    duplicate = ui.div(*items, class_="ticker-content", aria_hidden="true")
+    return ui.div(
+        ui.div(
+            content,
+            duplicate,
+            class_="ticker-track",
+            style=f"animation: ticker-scroll {duration}s linear infinite;",
+        ),
+        class_="occupation-ticker",
+        role="region",
+        aria_label="All occupations ticker",
     )
 
 
@@ -135,26 +246,31 @@ def build_age_chart(df: pd.DataFrame, occupation: str) -> go.Figure:
     if df.empty:
         return go.Figure()
 
+    df = _nullify(df.copy(), ["pct_chg_1y"])
+
     fig = px.line(
         df,
         x="year",
         y="pct_chg_1y",
-        color="age_group",
+        color="series",
         markers=True,
         custom_data=["count"],
         labels={
             "year": "Year",
             "pct_chg_1y": "Employment change (%)",
-            "age_group": "Age Group",
+            "series": "",
         },
     )
     fig.update_traces(
+        line={"width": 3},
+        marker={"size": 8},
         hovertemplate=(
             "<b>%{fullData.name}</b><br>"
             "Year: %{x}<br>"
             "Change: %{y:.1f}%<br>"
             "Employment: %{customdata[0]:,}<extra></extra>"
         ),
+        connectgaps=True,
     )
     fig.add_hline(y=0, line_color="grey", line_width=1)
     fig.update_layout(
@@ -164,8 +280,73 @@ def build_age_chart(df: pd.DataFrame, occupation: str) -> go.Figure:
             "x": 0.01,
             "xanchor": "left",
         },
-        legend={"title": None},
+        legend={
+            "orientation": "h",
+            "yanchor": "bottom",
+            "y": -0.35,
+            "xanchor": "center",
+            "x": 0.5,
+            "title": None,
+        },
         yaxis={"ticksuffix": "%"},
+    )
+    fig.update_xaxes(gridcolor=_C_GRID, zeroline=False, dtick=1)
+    fig.update_yaxes(gridcolor=_C_GRID, zeroline=False)
+    return fig
+
+
+def build_employment_count_chart(df: pd.DataFrame, occupation: str) -> go.Figure:
+    """
+    Build a Plotly line chart of absolute employment count by age group over time.
+
+    1-yr % change is shown on hover. Returns an empty figure if df is empty.
+    """
+    if df.empty:
+        return go.Figure()
+
+    df = df.copy()
+    df["pct_label"] = df["pct_chg_1y"].map(
+        lambda v: f"{v:.1f}%" if pd.notna(v) else "N/A",
+    )
+
+    fig = px.line(
+        df,
+        x="year",
+        y="count",
+        color="series",
+        markers=True,
+        custom_data=["pct_label"],
+        labels={
+            "year": "Year",
+            "count": "Employees",
+            "series": "",
+        },
+    )
+    fig.update_traces(
+        line={"width": 3},
+        marker={"size": 8},
+        hovertemplate=(
+            "<b>%{fullData.name}</b><br>"
+            "Year: %{x}<br>"
+            "Employment: %{y:,}<br>"
+            "1-yr Change: %{customdata[0]}<extra></extra>"
+        ),
+    )
+    fig.update_layout(
+        **_BASE_LAYOUT,
+        title={
+            "text": f"Annual Employment of {occupation} in Sweden",
+            "x": 0.01,
+            "xanchor": "left",
+        },
+        legend={
+            "orientation": "h",
+            "yanchor": "bottom",
+            "y": -0.35,
+            "xanchor": "center",
+            "x": 0.5,
+            "title": None,
+        },
     )
     fig.update_xaxes(gridcolor=_C_GRID, zeroline=False, dtick=1)
     fig.update_yaxes(gridcolor=_C_GRID, zeroline=False)
@@ -177,6 +358,8 @@ def build_comparison_employment_plot(df: pd.DataFrame) -> go.Figure:
     if df.empty:
         return go.Figure()
 
+    df = _nullify(df.copy(), ["pct_chg_1y"])
+
     fig = px.line(
         df,
         x="year",
@@ -187,20 +370,28 @@ def build_comparison_employment_plot(df: pd.DataFrame) -> go.Figure:
         labels={"pct_chg_1y": "Employment Change (%)", "year": "Year"},
     )
     fig.update_traces(
+        line={"width": 3},
+        marker={"size": 8},
         hovertemplate=(
             "<b>%{fullData.name}</b><br>"
             "Year: %{x}<br>"
             "Change: %{y:.1f}%<br>"
             "Employment: %{customdata[0]:,}<extra></extra>"
         ),
+        connectgaps=True,
     )
     fig.add_hline(y=0, line_color="grey", line_width=1)
     fig.update_layout(
         **_BASE_LAYOUT,
+        title={
+            "text": "Annual Employment Change by Occupation in Sweden",
+            "x": 0.01,
+            "xanchor": "left",
+        },
         legend={
             "orientation": "h",
             "yanchor": "bottom",
-            "y": -0.25,
+            "y": -0.35,
             "xanchor": "center",
             "x": 0.5,
             "title": None,
@@ -217,6 +408,8 @@ def build_comp_radar_plot(df: pd.DataFrame, metrics: dict[str, str]) -> go.Figur
     if df.empty:
         return go.Figure()
 
+    df = df.fillna(0)
+
     categories = list(metrics.values())
     fig = go.Figure()
 
@@ -232,7 +425,7 @@ def build_comp_radar_plot(df: pd.DataFrame, metrics: dict[str, str]) -> go.Figur
                 fill="toself",
                 name=row["occupation"],
                 hovertemplate="%{theta}: %{r:.1f}%<extra></extra>",
-            )
+            ),
         )
 
     fig.update_layout(
@@ -259,6 +452,8 @@ def build_ai_exposure_bar(df: pd.DataFrame, occupation: str, year: int) -> go.Fi
     """
     if df.empty:
         return go.Figure()
+
+    df = df.fillna({"score": 0.0, "level": 0, "percentile": 0.0})
 
     fig = go.Figure(
         go.Bar(
