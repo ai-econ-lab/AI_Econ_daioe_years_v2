@@ -59,7 +59,9 @@ jobs:
             "src/utils.py"
             "_brand.yml"
             "logos/lab.svg"
+            "css/ticker.css"
             "md_files/intro.md"
+            "md_files/about.md"
             "data/daioe_scb_years_processed.parquet"
             "Dockerfile"
             ".dockerignore"
@@ -89,7 +91,9 @@ jobs:
             "src/utils.py"
             "_brand.yml"
             "logos/lab.svg"
+            "css/ticker.css"
             "md_files/intro.md"
+            "md_files/about.md"
             "data/daioe_scb_years_processed.parquet"
             "Dockerfile"
             ".dockerignore"
@@ -132,7 +136,9 @@ jobs:
             src/utils.py \
             _brand.yml \
             logos/lab.svg \
+            css/ticker.css \
             md_files/intro.md \
+            md_files/about.md \
             data/daioe_scb_years_processed.parquet \
             Dockerfile \
             .dockerignore \
