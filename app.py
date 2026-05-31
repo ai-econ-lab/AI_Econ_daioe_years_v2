@@ -1,15 +1,25 @@
 from pathlib import Path
 
 import faicons as fa
-import pandas as pd
 import polars as pl
-from shiny import reactive, req
-from shiny.express import app_opts, input, render, ui
-from shinywidgets import render_plotly
+from shiny import reactive, render
+from shiny.express import app_opts, ui
+from shiny.express import input as app_input
+from shinywidgets import render_widget
 
-from src import calcs, visuals
-from src.constants import METRICS
+from src.calcs import (
+    get_all_occ_ai_exposure,
+    get_all_occ_summary,
+    get_comp_radar,
+    get_comp_summary,
+    get_comparison_employment,
+    get_occ_ai_exposure,
+    get_occ_employment_by_age,
+    get_occ_summary,
+)
+from src.constants import FIRST_COLS, METRICS
 from src.data import (
+    ABOUT_MD,
     AGES,
     INTRO_MD,
     LEVELS,
@@ -26,8 +36,29 @@ from src.utils import (
     download_media_type,
     export_filtered_data,
 )
+from src.visuals import (
+    build_age_chart,
+    build_ai_exposure_bar,
+    build_comp_radar_plot,
+    build_comparison_employment_plot,
+    build_employment_count_chart,
+    build_occupation_ribbon,
+    build_value_boxes,
+    export_fig,
+)
 
-app_opts(static_assets={"/logos": Path(__file__).parent / "logos"})
+LOGOS_PATH = Path(__file__).parent / "logos"
+CSS_PATH = Path(__file__).parent / "css"
+app_opts(static_assets={"/logos": LOGOS_PATH, "/css": CSS_PATH})
+
+ui.page_opts(
+    fillable=True,
+    theme=ui.Theme.from_brand(__file__),
+    lang="en",
+    full_width=True,
+)
+
+ui.tags.link(rel="stylesheet", href="/css/ticker.css")
 
 LEVEL_LABELS = {
     "SSYK1": "SSYK 1 - Major groups",
@@ -38,461 +69,618 @@ LEVEL_LABELS = {
 OCCUPATION_CHOICES = build_choices_by_level(lf, LEVELS)
 DEFAULT_LEVEL = "SSYK4" if "SSYK4" in LEVELS else LEVELS[0]
 DEFAULT_OCCUPATION = next(iter(OCCUPATION_CHOICES[DEFAULT_LEVEL]))
-
-ui.page_opts(
-    # title=ui.tags.span(
-    #     ui.tags.img(
-    #         src="logos/lab.svg",
-    #         height="32px",
-    #         style="margin-right:10px;vertical-align:middle;",
-    #     ),
-    #     "Yearly DAIOE Explorer of Swedish Occupations",
-    # ),
-    theme=ui.Theme.from_brand(__file__),
-    fillable=True,
-    lang="en",
-    full_width=True,
-)
+_LEVEL_CHOICES = {level: LEVEL_LABELS.get(level, level) for level in LEVELS}
 
 
-@reactive.calc
-def _download_frame():
-    """Collect filtered rows for the download tab."""
-    occupations = (
-        list(input.download_occupation()) if input.download_occupation() else None
-    )
-    years = input.download_years()
-    age = input.download_age()
-    sexes = list(input.download_sex())
+def _parse_comp_occs(
+    selected: list[str],
+    comp_level: str,
+) -> list[tuple[str, str]]:
+    """Parse selected comp_occs values into (level, occupation) pairs.
 
-    data = lf.filter(
-        (pl.col("level") == input.download_level())
-        & pl.col("year").is_between(int(years[0]), int(years[1])),
-    )
-    if sexes:
-        data = data.filter(pl.col("sex").is_in(sexes))
-    if age != "All":
-        data = data.filter(pl.col("age_group") == age)
-    if occupations:
-        data = data.filter(pl.col("occupation").is_in(occupations))
-    return data.collect()
+    For a specific level, returns [(comp_level, occ), ...].
+    For All Levels, values are encoded as "LEVEL|occupation" and parsed here.
+    """
+    if comp_level == "All Levels":
+        result = []
+        for v in selected:
+            if "|" not in v:
+                continue  # stale plain-name value from previous level; skip until UI re-encodes
+            lvl, occ = v.split("|", 1)
+            result.append((lvl, occ))
+        return result
+    return [(comp_level, occ) for occ in selected]
+
+
+def _occ_display_col(df: pl.DataFrame, is_all_levels: bool) -> pl.DataFrame:
+    """Append the SSYK level to occupation labels when comparing across levels.
+
+    Ensures duplicate occupation names from different levels render as distinct
+    series in charts and rows in tables.
+    """
+    if "level" not in df.columns:
+        return df
+    if is_all_levels:
+        return df.with_columns(
+            (pl.col("occupation") + " [" + pl.col("level") + "]").alias("occupation"),
+        ).drop("level")
+    return df.drop("level")
+
+
+# ── Tab navigation ────────────────────────────────────────────
+
+with ui.navset_pill(id="main_tabs"):
+    # ── Tab 1: Single Occupation ──────────────────────────────
+
+    with ui.nav_panel("Single Occupation"), ui.layout_sidebar():
+        with ui.sidebar(title="Single Occupation", width=280):
+            ui.div(
+                ui.img(
+                    src="/logos/lab.svg",
+                    alt="AI-Econ Lab logo",
+                    style="width:100%; max-width:180px;",
+                ),
+                style="text-align:center; margin-bottom:1rem;",
+            )
+            ui.markdown(INTRO_MD)
+            ui.hr()
+            ui.input_select(
+                "occ_level",
+                "SSYK Level",
+                choices=_LEVEL_CHOICES,
+                selected=DEFAULT_LEVEL,
+            )
+            ui.p(
+                "Sets the occupational detail level and updates the occupation list and scrolling ribbon.",
+                class_="text-muted small mt-n1 mb-2",
+            )
+            ui.input_selectize(
+                "occupation",
+                "Occupation",
+                choices=OCCUPATION_CHOICES[DEFAULT_LEVEL],
+                selected=DEFAULT_OCCUPATION,
+                options={"placeholder": "Search occupation..."},
+            )
+            ui.p(
+                "Updates value boxes, AI exposure chart, and both employment charts.",
+                class_="text-muted small mt-n1 mb-2",
+            )
+            ui.input_select(
+                "occ_year",
+                "Year",
+                choices={str(y): str(y) for y in YEARS},
+                selected=str(YEAR_MAX),
+            )
+            ui.p(
+                "Year for AI exposure scores and value boxes.",
+                class_="text-muted small mt-n1 mb-2",
+            )
+            ui.hr()
+            ui.p("Employment trend filters:", class_="fw-semibold mb-1 small")
+            ui.p(
+                "Controls the year range and age groups shown in both employment charts.",
+                class_="text-muted small mt-0 mb-2",
+            )
+            ui.input_slider(
+                "chart_year_range",
+                "Year range",
+                min=YEAR_MIN,
+                max=YEAR_MAX,
+                value=[YEAR_MIN, YEAR_MAX],
+                step=1,
+                sep="",
+            )
+            ui.input_selectize(
+                "chart_age_groups",
+                "Age groups",
+                choices=AGES,
+                selected=AGES[:2],
+                multiple=True,
+            )
+            ui.p(
+                "Select one or more age groups to display as separate lines in the employment charts. Each line tracks that age group's trend over the selected year range.",
+                class_="text-muted small mt-n1 mb-2",
+            )
+            ui.input_selectize(
+                "chart_sex",
+                "Sex overlay",
+                choices={"men": "Men", "women": "Women"},
+                selected=[],
+                multiple=True,
+            )
+            ui.p(
+                "Overlay individual sex breakdowns alongside the aggregate series.",
+                class_="text-muted small mt-n1 mb-2",
+            )
+
+        # Occupation ribbon (level-aware, outside cards)
+        @render.ui
+        def occ_ribbon():
+            summary_df = all_occ_summary()
+            if summary_df.is_empty():
+                return None
+            return build_occupation_ribbon(
+                summary_df.to_pandas(),
+                all_occ_ai().to_pandas(),
+                int(app_input.occ_year()),
+            )
+
+        # Value boxes (outside cards)
+        @render.ui
+        def occ_value_boxes():
+            summary = occ_summary()
+            if summary is None:
+                return ui.p(
+                    "No data for the selected occupation and year.",
+                    class_="text-muted p-3",
+                )
+            return build_value_boxes(summary, app_input.occupation())
+
+        # Stacked chart cards
+        with ui.layout_columns(col_widths=12):
+            with ui.card(full_screen=True, height="700px"):
+                with ui.card_header(class_="d-flex align-items-center gap-2"):
+                    ui.span("Annual Employment Change by Age Group")
+                    with ui.popover(placement="bottom"):
+                        fa.icon_svg("circle-info", height="1.2em")
+                        "Year-over-year percentage change in employment by age group. Values above zero indicate growth; below zero indicate decline."
+                    with ui.span(class_="ms-auto"):
+
+                        @render.download(
+                            filename=lambda: (
+                                f"{app_input.occupation().replace(' ', '_')}_employment_by_age.png"
+                            ),
+                            media_type="image/png",
+                            label=ui.span(
+                                fa.icon_svg("download"), title="Download as PNG"
+                            ),
+                        )
+                        def dl_occ_age_chart():
+                            yield export_fig(
+                                build_age_chart(
+                                    occ_employment_by_age().to_pandas(),
+                                    app_input.occupation(),
+                                ),
+                            )
+
+                @render_widget
+                def occ_age_chart():
+                    df = occ_employment_by_age().to_pandas()
+                    return build_age_chart(df, app_input.occupation())
+
+            with ui.card(full_screen=True, height="700px"):
+                with ui.card_header(class_="d-flex align-items-center gap-2"):
+                    ui.span("Employment by Age Group")
+                    with ui.popover(placement="bottom"):
+                        fa.icon_svg("circle-info", height="1.2em")
+                        "Absolute headcount by age group over the selected year range. Hover to see the 1-year percentage change."
+                    with ui.span(class_="ms-auto"):
+
+                        @render.download(
+                            filename=lambda: (
+                                f"{app_input.occupation().replace(' ', '_')}_employment_count.png"
+                            ),
+                            media_type="image/png",
+                            label=ui.span(
+                                fa.icon_svg("download"), title="Download as PNG"
+                            ),
+                        )
+                        def dl_occ_count_chart():
+                            yield export_fig(
+                                build_employment_count_chart(
+                                    occ_employment_by_age().to_pandas(),
+                                    app_input.occupation(),
+                                ),
+                            )
+
+                @render_widget
+                def occ_count_chart():
+                    df = occ_employment_by_age().to_pandas()
+                    return build_employment_count_chart(df, app_input.occupation())
+
+            with ui.card(full_screen=True, height="700px"):
+                with ui.card_header(class_="d-flex align-items-center gap-2"):
+                    ui.span("AI Exposure by Sub-Domain")
+                    with ui.popover(placement="bottom"):
+                        fa.icon_svg("circle-info", height="1.2em")
+                        "Each bar shows how this occupation ranks against all others for that AI sub-domain. Higher percentile = higher relative AI exposure."
+                    with ui.span(class_="ms-auto"):
+
+                        @render.download(
+                            filename=lambda: (
+                                f"{app_input.occupation().replace(' ', '_')}_ai_exposure.png"
+                            ),
+                            media_type="image/png",
+                            label=ui.span(
+                                fa.icon_svg("download"), title="Download as PNG"
+                            ),
+                        )
+                        def dl_ai_bar():
+                            yield export_fig(
+                                build_ai_exposure_bar(
+                                    occ_ai_exposure().to_pandas(),
+                                    app_input.occupation(),
+                                    int(app_input.occ_year()),
+                                ),
+                            )
+
+                @render_widget
+                def occ_ai_bar():
+                    df = occ_ai_exposure().to_pandas()
+                    return build_ai_exposure_bar(
+                        df,
+                        app_input.occupation(),
+                        int(app_input.occ_year()),
+                    )
+
+    # ── Tab 2: Compare Occupations ────────────────────────────
+
+    with ui.nav_panel("Compare Occupations"), ui.layout_sidebar():
+        with ui.sidebar(title="Compare Occupations", width=280):
+            ui.input_select(
+                "comp_level",
+                "SSYK Level",
+                choices={"All Levels": "All Levels", **_LEVEL_CHOICES},
+                selected=DEFAULT_LEVEL,
+            )
+            ui.input_selectize(
+                "comp_occs",
+                "Occupations",
+                choices={},
+                multiple=True,
+                options={"maxItems": 5, "placeholder": "Search occupation..."},
+            )
+            ui.p(
+                "Select up to five occupations to compare.",
+                class_="text-muted small mt-n1 mb-2",
+            )
+            ui.input_selectize(
+                "comp_age",
+                "Age Groups",
+                choices=AGES,
+                selected=AGES[:2],
+                multiple=True,
+            )
+            ui.input_select(
+                "comp_year",
+                "Year",
+                choices={str(y): str(y) for y in YEARS},
+                selected=str(YEAR_MAX),
+            )
+            ui.p(
+                "Year for the AI radar chart and summary table.",
+                class_="text-muted small mt-n1 mb-2",
+            )
+
+        # Occupations summary table
+        with ui.card(fill=True, fillable=True):
+            ui.card_header("Occupations Summary")
+
+            @render.ui
+            def comp_summary_table():
+                occs = list(app_input.comp_occs() or [])
+                ages = list(app_input.comp_age() or [])
+                if not occs or not ages:
+                    return ui.p(
+                        "Select occupations and age groups from the sidebar to compare.",
+                        class_="text-muted p-3",
+                    )
+                pairs = _parse_comp_occs(occs, app_input.comp_level())
+                df = get_comp_summary(lf, pairs, int(app_input.comp_year()), ages)
+                df = _occ_display_col(df, app_input.comp_level() == "All Levels")
+                return ui.div(
+                    as_great_table_html(df.to_pandas(), METRICS),
+                    style="overflow: auto; width: 100%; height: 100%;",
+                )
+
+        # AI percentile radar chart
+        with ui.card(full_screen=True, height="700px"):
+            with ui.card_header(class_="d-flex align-items-center gap-2"):
+                ui.span("AI Exposure Comparison (percentile rank)")
+                with ui.popover(placement="bottom"):
+                    fa.icon_svg("circle-info", height="1.2em")
+                    "Each axis shows a percentile rank (0-100). Outer position = higher relative AI exposure than other occupations."
+                with ui.span(class_="ms-auto"):
+
+                    @render.download(
+                        filename="ai_radar.png",
+                        media_type="image/png",
+                        label=ui.span(fa.icon_svg("download"), title="Download as PNG"),
+                    )
+                    def dl_comp_radar():
+                        yield export_fig(
+                            build_comp_radar_plot(
+                                comp_radar_data().to_pandas(),
+                                METRICS,
+                            ),
+                        )
+
+            @render_widget
+            def comp_radar_chart():
+                df = comp_radar_data().to_pandas()
+                return build_comp_radar_plot(df, METRICS)
+
+        # Employment comparison line chart
+        with ui.card(full_screen=True, height="700px"):
+            with ui.card_header(class_="d-flex align-items-center gap-2"):
+                ui.span("Annual Employment Change")
+                with ui.popover(placement="bottom"):
+                    fa.icon_svg("circle-info", height="1.2em")
+                    "1-year percentage change in employment for each selected occupation and the selected age groups."
+                with ui.span(class_="ms-auto"):
+
+                    @render.download(
+                        filename="comparison_employment.png",
+                        media_type="image/png",
+                        label=ui.span(fa.icon_svg("download"), title="Download as PNG"),
+                    )
+                    def dl_comp_employment():
+                        yield export_fig(
+                            build_comparison_employment_plot(
+                                comparison_data().to_pandas(),
+                            ),
+                        )
+
+            @render_widget
+            def comp_employment_chart():
+                df = comparison_data().to_pandas()
+                return build_comparison_employment_plot(df)
+
+    # ── Tab 3: Download Data ──────────────────────────────────
+
+    with ui.nav_panel("Download Data"), ui.layout_sidebar():
+        with ui.sidebar(title="Download Filters", width=280):
+            ui.input_select(
+                "download_level",
+                "SSYK Level",
+                choices=_LEVEL_CHOICES,
+                selected=DEFAULT_LEVEL,
+            )
+            ui.input_slider(
+                "download_years",
+                "Year range",
+                min=YEAR_MIN,
+                max=YEAR_MAX,
+                value=[YEAR_MIN, YEAR_MAX],
+                step=1,
+                sep="",
+            )
+            ui.input_checkbox_group(
+                "download_sex",
+                "Sex",
+                choices={"men": "Men", "women": "Women"},
+                selected=SEXES,
+                inline=True,
+            )
+            ui.input_select(
+                "download_age",
+                "Age Group",
+                choices={"All": "All ages"} | {a: a for a in AGES},
+                selected="All",
+            )
+            ui.input_selectize(
+                "download_occupation",
+                "Occupations",
+                choices=OCCUPATION_CHOICES[DEFAULT_LEVEL],
+                multiple=True,
+                options={"placeholder": "Leave empty to include all..."},
+            )
+            ui.input_select(
+                "download_format",
+                "Format",
+                choices={"csv": "CSV", "parquet": "Parquet", "excel": "Excel"},
+                selected="csv",
+            )
+            ui.hr()
+
+            @render.download(
+                filename=lambda: (
+                    "daioe_swedish_occupations_"
+                    f"{__import__('datetime').datetime.now().strftime('%Y-%m-%d')}."
+                    f"{download_extension(app_input.download_format())}"
+                ),
+                media_type=lambda: download_media_type(app_input.download_format()),
+                label="Download",
+            )
+            def download_data():
+                """Export filtered data in the selected format."""
+                yield export_filtered_data(
+                    download_frame().to_pandas(),
+                    app_input.download_format(),
+                )
+
+        ui.p(
+            "Export row-level yearly occupation data including employment counts, "
+            "percentage changes, and AI exposure scores. Use the sidebar to filter by "
+            "level, year range, sex, age group, and occupation.",
+            class_="text-muted mb-3",
+        )
+
+        with ui.layout_columns(col_widths=[6, 6]):
+            with ui.value_box(theme="primary"):
+                "Rows"
+
+                @render.text
+                def dl_row_count():
+                    return f"{download_frame().height:,}"
+
+            with ui.value_box(theme="primary"):
+                "Columns"
+
+                @render.text
+                def dl_col_count():
+                    return f"{download_frame().width:,}"
+
+        with ui.card(full_screen=True):
+            ui.card_header("Data Preview (first 50 rows)")
+
+            @render.ui
+            def dl_preview():
+                df = download_frame()
+                all_cols = df.columns
+                ordered = [c for c in FIRST_COLS if c in all_cols]
+                rest = [c for c in all_cols if c not in ordered]
+                return as_great_table_html(
+                    df.select(ordered + rest).head(50).to_pandas(),
+                    METRICS,
+                )
+
+    # ── Tab 4: About ──────────────────────────────────────────
+
+    with ui.nav_panel("About"), ui.card(fill=True, fillable=True):
+        ui.card_header("About This Dashboard")
+        ui.div(
+            ui.img(
+                src="/logos/lab.svg",
+                alt="AI-Econ Lab logo",
+                style="height:60px; display:block; margin:1rem 0 1.5rem;",
+            ),
+        )
+        ui.markdown(ABOUT_MD)
+
+
+# ── Reactive calculations ─────────────────────────────────────
 
 
 @reactive.calc
 def occ_summary():
-    """Reactive wrapper: returns summary dict for the selected occupation and year."""
-    return calcs.get_occ_summary(lf, input.occupation(), int(input.occ_year()))
+    return get_occ_summary(
+        lf,
+        app_input.occ_level(),
+        app_input.occupation(),
+        int(app_input.occ_year()),
+    )
 
 
 @reactive.calc
-def comparison_data():
-    """Return total employment per year/occupation for the comparison view."""
-    occs = list(input.comp_occs())
-    ages = list(input.comp_age())
-    req(occs, ages)
-    return calcs.get_comparison_employment(lf, occs, ages)
+def all_occ_summary():
+    return get_all_occ_summary(lf, app_input.occ_level(), int(app_input.occ_year()))
 
 
 @reactive.calc
-def comp_radar_data():
-    """Return mean AI percentile scores per occupation for the radar chart."""
-    occs = list(input.comp_occs())
-    req(occs)
-    return calcs.get_comp_radar(lf, occs, int(input.comp_year()))
+def all_occ_ai():
+    return get_all_occ_ai_exposure(lf, app_input.occ_level(), int(app_input.occ_year()))
+
+
+@reactive.calc
+def occ_ai_exposure():
+    return get_occ_ai_exposure(
+        lf,
+        app_input.occ_level(),
+        app_input.occupation(),
+        int(app_input.occ_year()),
+    )
 
 
 @reactive.calc
 def occ_employment_by_age():
-    """Reactive wrapper: returns long-format employment by age group for the line chart."""
-    return calcs.get_occ_employment_by_age(
+    yr = app_input.chart_year_range()
+    ages = list(app_input.chart_age_groups() or [])
+    extra_sexes = tuple(app_input.chart_sex() or [])
+    if not ages:
+        return pl.DataFrame(
+            schema={
+                "year": pl.Int64,
+                "age_group": pl.String,
+                "count": pl.Float64,
+                "chg_1y": pl.Float64,
+                "pct_chg_1y": pl.Float64,
+                "sex": pl.String,
+                "series": pl.String,
+            },
+        )
+    return get_occ_employment_by_age(
         lf,
-        input.occupation(),
-        (int(input.chart_year_range()[0]), int(input.chart_year_range()[1])),
-        list(input.chart_age_groups()),
+        app_input.occ_level(),
+        app_input.occupation(),
+        (int(yr[0]), int(yr[1])),
+        ages,
+        extra_sexes,
     )
 
 
-with ui.navset_pill(id="tab"):
-    with ui.nav_panel(title="1. Occupation View"):
-        with ui.layout_sidebar():
-            with ui.sidebar(width="280px", bg="#FFFFFF", title="Occupation Explorer"):
-                ui.tags.img(
-                    src="/logos/lab.svg",
-                    style="display:block;width:100%;max-width:160px;margin-bottom:10px;",
-                )
-                ui.markdown(INTRO_MD)
-                ui.input_select(
-                    "occ_level",
-                    "SSYK level",
-                    choices={level: LEVEL_LABELS.get(level, level) for level in LEVELS},
-                    selected=DEFAULT_LEVEL,
-                )
-                ui.input_selectize(
-                    "occupation",
-                    "Occupation",
-                    choices=OCCUPATION_CHOICES[DEFAULT_LEVEL],
-                    selected=DEFAULT_OCCUPATION,
-                )
-                ui.input_select(
-                    "occ_year",
-                    "Year",
-                    choices={y: str(y) for y in YEARS},
-                    selected=YEAR_MAX,
-                )
+@reactive.calc
+def comparison_data():
+    occs = list(app_input.comp_occs() or [])
+    ages = list(app_input.comp_age() or [])
+    if not occs or not ages:
+        return pl.DataFrame(
+            schema={
+                "year": pl.Int64,
+                "occupation": pl.String,
+                "count": pl.Int64,
+                "pct_chg_1y": pl.Float64,
+            },
+        )
+    pairs = _parse_comp_occs(occs, app_input.comp_level())
+    df = get_comparison_employment(lf, pairs, ages)
+    return _occ_display_col(df, app_input.comp_level() == "All Levels")
 
-            with ui.layout_columns(col_widths=[12, 12]):
-                with ui.card(full_screen=True, height="400px"):
 
-                    @render.ui
-                    def occ_value_boxes():
-                        """Render employment and % change value boxes for the selected occupation."""
-                        req(input.occupation())
-                        summary = occ_summary()
-                        if summary is None:
-                            return ui.p("No data available.")
-                        return visuals.build_value_boxes(summary, input.occupation())
+@reactive.calc
+def comp_radar_data():
+    occs = list(app_input.comp_occs() or [])
+    if not occs:
+        return pl.DataFrame()
+    pairs = _parse_comp_occs(occs, app_input.comp_level())
+    df = get_comp_radar(lf, pairs, int(app_input.comp_year()))
+    return _occ_display_col(df, app_input.comp_level() == "All Levels")
 
-                with ui.card(full_screen=True, height="700px"):
-                    with ui.card_header(class_="d-flex align-items-center"):
-                        "AI Exposure by Sub-domain"
-                        with ui.span(class_="ms-auto"):
 
-                            @render.download(
-                                label=ui.span(fa.icon_svg("download"), " PNG"),
-                                filename=lambda: (
-                                    f"{input.occupation().replace(' ', '_')}_ai_exposure.png"
-                                ),
-                                media_type="image/png",
-                            )
-                            def dl_ai_exposure_bar():
-                                df = calcs.get_occ_ai_exposure(
-                                    lf, input.occupation(), int(input.occ_year())
-                                )
-                                fig = visuals.build_ai_exposure_bar(
-                                    df.to_pandas(),
-                                    input.occupation(),
-                                    int(input.occ_year()),
-                                )
-                                yield visuals.export_fig(fig, width=900, height=600)
+@reactive.calc
+def download_frame():
+    years = app_input.download_years()
+    q = lf.filter(
+        (pl.col("level") == app_input.download_level())
+        & pl.col("year").is_between(int(years[0]), int(years[1])),
+    )
+    sexes = list(app_input.download_sex())
+    if sexes:
+        q = q.filter(pl.col("sex").is_in(sexes))
+    age = app_input.download_age()
+    if age != "All":
+        q = q.filter(pl.col("age_group") == age)
+    occupations = list(app_input.download_occupation())
+    if occupations:
+        q = q.filter(pl.col("occupation").is_in(occupations))
+    return q.collect()
 
-                    @render_plotly
-                    def ai_exposure_bar():
-                        """Render bar chart of AI exposure level per sub-domain, coloured by index score."""
-                        req(input.occupation())
-                        df = calcs.get_occ_ai_exposure(
-                            lf,
-                            input.occupation(),
-                            int(input.occ_year()),
-                        )
-                        return visuals.build_ai_exposure_bar(
-                            df.to_pandas(),
-                            input.occupation(),
-                            int(input.occ_year()),
-                        )
 
-                    ui.markdown(visuals.DAIOE_SOURCE_MD)
-
-                with ui.card(full_screen=True, height="700px"):
-                    with ui.card_header(class_="d-flex align-items-center"):
-                        "Employment by Age Group"
-                        with ui.span(class_="ms-auto"):
-
-                            @render.download(
-                                label=ui.span(fa.icon_svg("download"), " PNG"),
-                                filename=lambda: (
-                                    f"{input.occupation().replace(' ', '_')}_employment_by_age.png"
-                                ),
-                                media_type="image/png",
-                            )
-                            def dl_occ_age_chart():
-                                df = occ_employment_by_age()
-                                fig = visuals.build_age_chart(
-                                    df.to_pandas(), input.occupation()
-                                )
-                                yield visuals.export_fig(fig, width=1000, height=650)
-
-                    with ui.layout_sidebar():
-                        with ui.sidebar(width="220px", open="closed"):
-                            ui.input_slider(
-                                "chart_year_range",
-                                "Year range",
-                                min=min(YEARS),
-                                max=max(YEARS),
-                                value=(min(YEARS), max(YEARS)),
-                                step=1,
-                                sep="",
-                            )
-                            ui.input_selectize(
-                                "chart_age_groups",
-                                "Age groups",
-                                choices=AGES,
-                                selected=AGES[:2],
-                                multiple=True,
-                            )
-
-                        @render_plotly
-                        def occ_age_chart():
-                            """Render a line chart of 1-yr employment % change per age group."""
-                            req(input.occupation())
-                            df = occ_employment_by_age()
-                            return visuals.build_age_chart(
-                                df.to_pandas(),
-                                input.occupation(),
-                            )
-
-                        ui.markdown(visuals.SCB_SOURCE_MD)
-
-                # with ui.card():
-                #     "Card 4"
-
-    with ui.nav_panel(title="2. Comparison View"):
-        with ui.layout_sidebar():
-            with ui.sidebar(bg="#FFFFFF", width=250, title="Benchmarking"):
-                ui.input_select(
-                    "comp_level",
-                    "SSYK Level",
-                    choices=["All Levels", *LEVELS],
-                    selected=DEFAULT_LEVEL,
-                )
-                ui.input_selectize(
-                    "comp_occs",
-                    "Select Occupations",
-                    choices={},
-                    multiple=True,
-                    options={"placeholder": "Accountants ..."},
-                )
-                ui.hr()
-                ui.input_selectize(
-                    "comp_age",
-                    "Age Group",
-                    choices=AGES,
-                    selected="Early Career 2 (25-29)",
-                    multiple=True,
-                )
-                ui.hr()
-                ui.input_select(
-                    "comp_year",
-                    "Comparison Year (Radar)",
-                    choices=[str(y) for y in YEARS],
-                    selected=str(YEAR_MAX),
-                )
-
-            with ui.card():
-                ui.card_header("Occupations Summary")
-
-                @render.ui
-                def comparison_summary():
-                    df = comparison_data()
-
-                    latest_yr = df["year"].max()
-                    rows = []
-                    for occ in df["occupation"].unique():
-                        sub = df.filter(pl.col("occupation") == occ).sort("year")
-
-                        def _val(yr, _sub=sub):
-                            s = _sub.filter(pl.col("year") == yr)["count"]
-                            return int(s[0]) if not s.is_empty() else None
-
-                        rows.append(
-                            {
-                                "Occupation": occ,
-                                f"Emp ({latest_yr - 5})": _val(latest_yr - 5),
-                                f"Emp ({latest_yr - 3})": _val(latest_yr - 3),
-                                f"Emp ({latest_yr - 1})": _val(latest_yr - 1),
-                                f"Emp ({latest_yr})": _val(latest_yr),
-                            }
-                        )
-
-                    summary_df = pd.DataFrame(rows)
-                    emp_cols = [c for c in summary_df.columns if c != "Occupation"]
-                    for col in emp_cols:
-                        summary_df[col] = summary_df[col].astype("Int64")
-                    return as_great_table_html(summary_df, METRICS)
-
-            with ui.layout_columns(col_widths=[12, 12]):
-                with ui.card(full_screen=True, height="700px"):
-                    with ui.card_header(class_="d-flex align-items-center"):
-                        "Radar Comparison (AI Exposure Percentiles)"
-                        with ui.span(class_="ms-auto"):
-
-                            @render.download(
-                                label=ui.span(fa.icon_svg("download"), " PNG"),
-                                filename="radar_comparison.png",
-                                media_type="image/png",
-                            )
-                            def dl_comp_radar_plot():
-                                fig = visuals.build_comp_radar_plot(
-                                    comp_radar_data().to_pandas(), METRICS
-                                )
-                                yield visuals.export_fig(fig, width=900, height=750)
-
-                    @render_plotly
-                    def comp_radar_plot():
-                        return visuals.build_comp_radar_plot(
-                            comp_radar_data().to_pandas(),
-                            METRICS,
-                        )
-
-                with ui.card(full_screen=True, height="700px"):
-                    with ui.card_header(class_="d-flex align-items-center"):
-                        "Annual Employment Change (Selected Occupations)"
-                        with ui.span(class_="ms-auto"):
-
-                            @render.download(
-                                label=ui.span(fa.icon_svg("download"), " PNG"),
-                                filename="employment_comparison.png",
-                                media_type="image/png",
-                            )
-                            def dl_comparison_employment_plot():
-                                fig = visuals.build_comparison_employment_plot(
-                                    comparison_data().to_pandas()
-                                )
-                                yield visuals.export_fig(fig, width=1000, height=650)
-
-                    @render_plotly
-                    def comparison_employment_plot():
-                        return visuals.build_comparison_employment_plot(
-                            comparison_data().to_pandas(),
-                        )
-
-    with ui.nav_panel(title="3. Download"):
-        with ui.layout_sidebar():
-            with ui.sidebar(bg="#FFFFFF", width=250, title="Filters"):
-                ui.input_select(
-                    "download_level",
-                    "SSYK level",
-                    choices={level: LEVEL_LABELS.get(level, level) for level in LEVELS},
-                    selected=DEFAULT_LEVEL,
-                )
-                ui.input_slider(
-                    "download_years",
-                    "Year range",
-                    min=YEAR_MIN,
-                    max=YEAR_MAX,
-                    value=(YEAR_MIN, YEAR_MAX),
-                    step=1,
-                    sep="",
-                )
-                ui.input_checkbox_group(
-                    "download_sex",
-                    "Sex",
-                    choices={"men": "Men", "women": "Women"},
-                    selected=SEXES,
-                    inline=True,
-                )
-                ui.input_select(
-                    "download_age",
-                    "Age group",
-                    choices={"All": "All ages"} | {a: a for a in AGES},
-                    selected="All",
-                )
-                ui.input_selectize(
-                    "download_occupation",
-                    "Occupations",
-                    choices=OCCUPATION_CHOICES[DEFAULT_LEVEL],
-                    multiple=True,
-                    options={"placeholder": "All occupations"},
-                )
-                ui.input_select(
-                    "download_format",
-                    "Format",
-                    choices={"csv": "CSV", "parquet": "Parquet", "excel": "Excel"},
-                    selected="csv",
-                )
-                ui.hr()
-
-                @render.download(
-                    filename=lambda: (
-                        "daioe_swedish_occupations_"
-                        f"{__import__('datetime').datetime.now().strftime('%Y-%m-%d')}."
-                        f"{download_extension(input.download_format())}"
-                    ),
-                    media_type=lambda: download_media_type(input.download_format()),
-                    label="Download",
-                )
-                def download_data():
-                    """Export filtered data in the selected format."""
-                    yield export_filtered_data(
-                        _download_frame().to_pandas(),
-                        input.download_format(),
-                    )
-
-            with ui.layout_columns(col_widths=[6, 6]):
-                with ui.value_box(theme="primary"):
-                    "Rows"
-
-                    @render.text
-                    def download_rows_count():
-                        """Show count of rows matching current download filters."""
-                        return f"{_download_frame().height:,}"
-
-                with ui.value_box(theme="primary"):
-                    "Columns"
-
-                    @render.text
-                    def download_cols_count():
-                        """Show count of columns in the download frame."""
-                        return f"{_download_frame().width:,}"
-
-            with ui.card(full_screen=True):
-                ui.card_header("Data Preview (first 50 rows)")
-
-                @render.ui
-                def download_preview():
-                    """Render a preview table of the filtered download data."""
-                    cols = [
-                        "level",
-                        "ssyk_code",
-                        "occupation",
-                        "year",
-                        "sex",
-                        "age_group",
-                        "count",
-                        "chg_1y",
-                        "pct_chg_1y",
-                        "chg_3y",
-                        "pct_chg_3y",
-                        "chg_5y",
-                        "pct_chg_5y",
-                        "pctl_daioe_genai_wavg",
-                        "pctl_daioe_allapps_wavg",
-                        "pctl_daioe_readcompr_wavg",
-                        "pctl_daioe_lngmod_wavg",
-                        "pctl_daioe_imggen_wavg",
-                        "pctl_daioe_imgrec_wavg",
-                        "pctl_daioe_translat_wavg",
-                        "pctl_daioe_speechrec_wavg",
-                        "pctl_daioe_stratgames_wavg",
-                        "pctl_daioe_videogames_wavg",
-                        "pctl_daioe_imgcompr_wavg",
-                    ]
-                    data = _download_frame().select(cols).head(50).to_pandas()
-                    return as_great_table_html(data, METRICS)
+# ── Reactive effects ──────────────────────────────────────────
 
 
 @reactive.effect
 def _sync_occupation_choices():
     """Update the occupation selectize choices whenever the SSYK level changes."""
-    level = input.occ_level()
+    level = app_input.occ_level()
     choices = OCCUPATION_CHOICES[level]
     ui.update_selectize("occupation", choices=choices, selected=next(iter(choices)))
 
 
 @reactive.effect
 def _sync_comp_occupation_choices():
-    """Update comparison occupation choices when the SSYK level changes."""
-    level = input.comp_level()
+    """Update comparison occupation choices when the SSYK level changes.
+
+    For All Levels mode, keys are encoded as "LEVEL|occupation" and labels show the
+    level in brackets so duplicate occupation names across levels are distinguishable.
+    """
+    level = app_input.comp_level()
     if level == "All Levels":
-        choices = {occ: occ for d in OCCUPATION_CHOICES.values() for occ in d}
+        choices = {
+            f"{lvl}|{occ}": f"{occ} [{LEVEL_LABELS.get(lvl, lvl)}]"
+            for lvl in LEVELS
+            for occ in OCCUPATION_CHOICES[lvl]
+        }
     else:
         choices = OCCUPATION_CHOICES.get(level, {})
-    ui.update_selectize("comp_occs", choices=choices, selected=[])
+    default_two = list(choices)[:2]
+    ui.update_selectize("comp_occs", choices=choices, selected=default_two)
 
 
 @reactive.effect
 def _sync_download_occupation_choices():
     """Update the download occupation selectize when the download SSYK level changes."""
-    level = input.download_level()
+    level = app_input.download_level()
     ui.update_selectize(
         "download_occupation",
         choices=OCCUPATION_CHOICES[level],

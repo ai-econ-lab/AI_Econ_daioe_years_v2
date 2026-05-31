@@ -10,6 +10,8 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 INTRO_MD: str = (BASE_DIR / "md_files" / "intro.md").read_text(encoding="utf-8")
 
+_ABOUT_TEMPLATE: str = (BASE_DIR / "md_files" / "about.md").read_text(encoding="utf-8")
+
 DATA_PATH = BASE_DIR / "data" / "daioe_scb_years_processed.parquet"
 
 lf = pl.scan_parquet(DATA_PATH)
@@ -32,6 +34,8 @@ YEARS: list[int] = (
 
 YEAR_MIN: int = min(YEARS)
 YEAR_MAX: int = max(YEARS)
+
+ABOUT_MD: str = _ABOUT_TEMPLATE.format(YEAR_MIN=YEAR_MIN, YEAR_MAX=YEAR_MAX)
 
 
 def build_choices_by_level(
