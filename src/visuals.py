@@ -1,8 +1,13 @@
+import re
+
 import faicons as fa
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 from shiny import ui
+
+# Matches any leading non-ASCII characters (emojis, symbols) and trailing space.
+_EMOJI_PREFIX = re.compile(r"^[^\x00-\x7F]+\s*")
 
 SCB_SOURCE_MD = (
     "Source: [Swedish Occupational Register, SCB]"
@@ -494,8 +499,28 @@ def build_ai_exposure_bar(df: pd.DataFrame, occupation: str, year: int) -> go.Fi
     return fig
 
 
+def _strip_emoji(val: object) -> object:
+    if isinstance(val, str):
+        return _EMOJI_PREFIX.sub("", val)
+    if isinstance(val, (list, tuple)):
+        stripped = [_EMOJI_PREFIX.sub("", v) if isinstance(v, str) else v for v in val]
+        return type(val)(stripped)
+    return val
+
+
 def export_fig(fig: go.Figure, width: int = 1000, height: int = 650) -> bytes:
-    """Return PNG bytes of a figure with a solid white background."""
+    """Return PNG bytes of a figure with a solid white background and no emoji labels."""
+    import copy
+
+    fig = copy.deepcopy(fig)
+    for trace in fig.data:
+        for field in ("y", "x", "theta", "text", "name"):
+            val = getattr(trace, field, None)
+            if val is not None:
+                try:
+                    trace.update({field: _strip_emoji(val)})
+                except Exception:  # noqa: BLE001
+                    pass
     is_polar = any(getattr(t, "type", "") == "scatterpolar" for t in fig.data)
     fig.update_layout(paper_bgcolor="white", plot_bgcolor="white")
     if is_polar:
