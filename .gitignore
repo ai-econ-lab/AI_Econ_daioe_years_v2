@@ -13,3 +13,5 @@ wheels/
 .vscode
 .claude
 CLAUDE.md
+.antigravitycli
+snowflake.log
