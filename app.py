@@ -183,13 +183,13 @@ with ui.navset_pill(id="main_tabs"):
             )
             ui.input_selectize(
                 "chart_sex",
-                "Sex overlay",
+                "Gender overlay",
                 choices={"men": "Men", "women": "Women"},
                 selected=[],
                 multiple=True,
             )
             ui.p(
-                "Overlay individual sex breakdowns alongside the aggregate series.",
+                "Overlay individual gender breakdowns alongside the aggregate series.",
                 class_="text-muted small mt-n1 mb-2",
             )
 
@@ -447,7 +447,7 @@ with ui.navset_pill(id="main_tabs"):
             )
             ui.input_checkbox_group(
                 "download_sex",
-                "Sex",
+                "Gender",
                 choices={"men": "Men", "women": "Women"},
                 selected=SEXES,
                 inline=True,
@@ -492,7 +492,7 @@ with ui.navset_pill(id="main_tabs"):
         ui.p(
             "Export row-level yearly occupation data including employment counts, "
             "percentage changes, and AI exposure scores. Use the sidebar to filter by "
-            "level, year range, sex, age group, and occupation.",
+            "level, year range, gender, age group, and occupation.",
             class_="text-muted mb-3",
         )
 
