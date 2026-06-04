@@ -6,7 +6,7 @@ This dashboard brings together yearly employment statistics from Statistics Swed
 
 | Source | Description |
 |---|---|
-| [Swedish Occupational Register, SCB](https://www.scb.se/en/finding-statistics/statistics-by-subject-area/labour-market/labour-force-supply/the-swedish-occupational-register-with-statistics/) | Yearly employment counts and year-over-year changes by occupation, sex, and age group |
+| [Swedish Occupational Register, SCB](https://www.scb.se/en/finding-statistics/statistics-by-subject-area/labour-market/labour-force-supply/the-swedish-occupational-register-with-statistics/) | Yearly employment counts and year-over-year changes by occupation, gender, and age group |
 | [DAIOE Framework](https://www.ai-econlab.com/ai-exposure-daioe) | Data-driven AI Occupational Exposure scores across multiple AI capability sub-domains |
 
 ---
@@ -42,7 +42,7 @@ Shows where an occupation sits relative to all others on a given sub-domain. A p
 An ordinal scale from 1 (Very Low) to 5 (Very High) summarising the weighted-average AI exposure score for a sub-domain. Used for quick comparisons; the underlying index score provides more precision.
 
 **Employment Change**
-Year-over-year or multi-year percentage change computed from absolute employment counts. Positive values indicate growth; negative values indicate decline. Changes are computed from aggregated employment counts and absolute changes, not by averaging sex- or age-group-specific percentage rates.
+Year-over-year or multi-year percentage change computed from absolute employment counts. Positive values indicate growth; negative values indicate decline. Changes are computed from aggregated employment counts and absolute changes, not by averaging gender- or age-group-specific percentage rates.
 
 **Age Groups**
 Employment is broken down by seven age bands: Early Career 1 (16-24), Early Career 2 (25-29), Developing (30-34), Mid-Career 1 (35-39), Mid-Career 1 (40-44), Mid-Career 2 (45-49), and Senior (50+).

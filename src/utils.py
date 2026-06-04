@@ -22,7 +22,7 @@ def readable_column_name(col: str, metrics: dict[str, str]) -> str:
         "age_group": "Age Group",
         "count": "Employees",
         "year": "Year",
-        "sex": "Sex",
+        "sex": "Gender",
         "level": "SSYK Level",
         "occupation": "Occupation",
         "chg_1y": "Emp Change 1yr (#)",
