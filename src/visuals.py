@@ -37,6 +37,22 @@ _BASE_LAYOUT: dict = {
 }
 
 
+def _empty_figure() -> go.Figure:
+    """Return a blank figure with a centered 'No data available' annotation."""
+    fig = go.Figure()
+    fig.add_annotation(
+        text="No data available",
+        showarrow=False,
+        font={"size": 16, "color": "#999"},
+        xref="paper",
+        yref="paper",
+        x=0.5,
+        y=0.5,
+    )
+    fig.update_layout(**_BASE_LAYOUT)
+    return fig
+
+
 def _nullify(df: pd.DataFrame, cols: list[str]) -> pd.DataFrame:
     """Replace NaN with Python None in specified columns so Plotly serialises them as JSON null."""
     for col in cols:
@@ -126,7 +142,7 @@ def build_age_chart(df: pd.DataFrame, occupation: str) -> go.Figure:
     Absolute employment count is shown on hover. Returns an empty figure if df is empty.
     """
     if df.empty:
-        return go.Figure()
+        return _empty_figure()
 
     df = _nullify(df.copy(), ["pct_chg_1y"])
 
@@ -184,7 +200,7 @@ def build_employment_count_chart(df: pd.DataFrame, occupation: str) -> go.Figure
     1-yr % change is shown on hover. Returns an empty figure if df is empty.
     """
     if df.empty:
-        return go.Figure()
+        return _empty_figure()
 
     df = df.copy()
     df["pct_label"] = df["pct_chg_1y"].map(
@@ -238,7 +254,7 @@ def build_employment_count_chart(df: pd.DataFrame, occupation: str) -> go.Figure
 def build_comparison_employment_plot(df: pd.DataFrame) -> go.Figure:
     """Build a line chart comparing 1-yr employment % change across selected occupations."""
     if df.empty:
-        return go.Figure()
+        return _empty_figure()
 
     df = _nullify(df.copy(), ["pct_chg_1y"])
 
@@ -288,7 +304,7 @@ def build_comparison_employment_plot(df: pd.DataFrame) -> go.Figure:
 def build_comp_radar_plot(df: pd.DataFrame, metrics: dict[str, str]) -> go.Figure:
     """Build a radar chart comparing AI percentile scores across selected occupations."""
     if df.empty:
-        return go.Figure()
+        return _empty_figure()
 
     df = df.fillna(0)
 
@@ -333,7 +349,7 @@ def build_ai_exposure_bar(df: pd.DataFrame, occupation: str, year: int) -> go.Fi
     Hover shows exposure level label, index score, and percentile rank.
     """
     if df.empty:
-        return go.Figure()
+        return _empty_figure()
 
     df = df.fillna({"score": 0.0, "level": 0, "percentile": 0.0})
 
