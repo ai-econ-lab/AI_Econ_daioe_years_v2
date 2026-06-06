@@ -34,7 +34,6 @@ COPY app.py ./app.py
 COPY src ./src
 COPY data ./data
 COPY logos ./logos
-COPY css ./css
 COPY md_files ./md_files
 COPY _brand.yml ./_brand.yml
 COPY README.md ./README.md
