@@ -224,15 +224,16 @@ with ui.navset_pill(id="main_tabs"):
                         def dl_occ_age_chart():
                             yield export_fig(
                                 build_age_chart(
-                                    occ_employment_by_age().to_pandas(),
+                                    occ_employment_by_age_pd(),
                                     app_input.occupation(),
                                 ),
                             )
 
                 @render_widget
                 def occ_age_chart():
-                    df = occ_employment_by_age().to_pandas()
-                    return build_age_chart(df, app_input.occupation())
+                    return build_age_chart(
+                        occ_employment_by_age_pd(), app_input.occupation()
+                    )
 
             with ui.card(full_screen=True, height="700px"):
                 with ui.card_header(class_="d-flex align-items-center gap-2"):
@@ -254,15 +255,16 @@ with ui.navset_pill(id="main_tabs"):
                         def dl_occ_count_chart():
                             yield export_fig(
                                 build_employment_count_chart(
-                                    occ_employment_by_age().to_pandas(),
+                                    occ_employment_by_age_pd(),
                                     app_input.occupation(),
                                 ),
                             )
 
                 @render_widget
                 def occ_count_chart():
-                    df = occ_employment_by_age().to_pandas()
-                    return build_employment_count_chart(df, app_input.occupation())
+                    return build_employment_count_chart(
+                        occ_employment_by_age_pd(), app_input.occupation()
+                    )
 
             with ui.card(full_screen=True, height="700px"):
                 with ui.card_header(class_="d-flex align-items-center gap-2"):
@@ -284,7 +286,7 @@ with ui.navset_pill(id="main_tabs"):
                         def dl_ai_bar():
                             yield export_fig(
                                 build_ai_exposure_bar(
-                                    occ_ai_exposure().to_pandas(),
+                                    occ_ai_exposure_pd(),
                                     app_input.occupation(),
                                     int(app_input.occ_year()),
                                 ),
@@ -292,9 +294,8 @@ with ui.navset_pill(id="main_tabs"):
 
                 @render_widget
                 def occ_ai_bar():
-                    df = occ_ai_exposure().to_pandas()
                     return build_ai_exposure_bar(
-                        df,
+                        occ_ai_exposure_pd(),
                         app_input.occupation(),
                         int(app_input.occ_year()),
                     )
@@ -376,15 +377,14 @@ with ui.navset_pill(id="main_tabs"):
                     def dl_comp_radar():
                         yield export_fig(
                             build_comp_radar_plot(
-                                comp_radar_data().to_pandas(),
+                                comp_radar_data_pd(),
                                 METRICS,
                             ),
                         )
 
             @render_widget
             def comp_radar_chart():
-                df = comp_radar_data().to_pandas()
-                return build_comp_radar_plot(df, METRICS)
+                return build_comp_radar_plot(comp_radar_data_pd(), METRICS)
 
         # Employment comparison line chart
         with ui.card(full_screen=True, height="700px"):
@@ -403,14 +403,13 @@ with ui.navset_pill(id="main_tabs"):
                     def dl_comp_employment():
                         yield export_fig(
                             build_comparison_employment_plot(
-                                comparison_data().to_pandas(),
+                                comparison_data_pd(),
                             ),
                         )
 
             @render_widget
             def comp_employment_chart():
-                df = comparison_data().to_pandas()
-                return build_comparison_employment_plot(df)
+                return build_comparison_employment_plot(comparison_data_pd())
 
     # ── Tab 3: Download Data ──────────────────────────────────
 
@@ -601,6 +600,26 @@ def comp_radar_data():
     pairs = _parse_comp_occs(occs, app_input.comp_level())
     df = get_comp_radar(lf, pairs, int(app_input.comp_year()))
     return _occ_display_col(df, app_input.comp_level() == "All Levels")
+
+
+@reactive.calc
+def occ_employment_by_age_pd():
+    return occ_employment_by_age().to_pandas()
+
+
+@reactive.calc
+def occ_ai_exposure_pd():
+    return occ_ai_exposure().to_pandas()
+
+
+@reactive.calc
+def comparison_data_pd():
+    return comparison_data().to_pandas()
+
+
+@reactive.calc
+def comp_radar_data_pd():
+    return comp_radar_data().to_pandas()
 
 
 @reactive.calc
