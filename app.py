@@ -8,8 +8,6 @@ from shiny.express import input as app_input
 from shinywidgets import render_widget
 
 from src.calcs import (
-    get_all_occ_ai_exposure,
-    get_all_occ_summary,
     get_comp_radar,
     get_comp_summary,
     get_comparison_employment,
@@ -42,17 +40,16 @@ from src.visuals import (
     build_comp_radar_plot,
     build_comparison_employment_plot,
     build_employment_count_chart,
-    build_occupation_ribbon,
     build_value_boxes,
     export_fig,
 )
 
 import kaleido
+
 kaleido.start_sync_server(silence_warnings=True)
 
 LOGOS_PATH = Path(__file__).parent / "logos"
-CSS_PATH = Path(__file__).parent / "css"
-app_opts(static_assets={"/logos": LOGOS_PATH, "/css": CSS_PATH})
+app_opts(static_assets={"/logos": LOGOS_PATH})
 
 ui.page_opts(
     fillable=True,
@@ -60,8 +57,6 @@ ui.page_opts(
     lang="en",
     full_width=True,
 )
-
-ui.tags.link(rel="stylesheet", href="/css/ticker.css")
 
 LEVEL_LABELS = {
     "SSYK1": "SSYK 1 - Major groups",
@@ -134,7 +129,7 @@ with ui.navset_pill(id="main_tabs"):
                 selected=DEFAULT_LEVEL,
             )
             ui.p(
-                "Sets the occupational detail level and updates the occupation list and scrolling ribbon.",
+                "Sets the occupational detail level and updates the occupation list.",
                 class_="text-muted small mt-n1 mb-2",
             )
             ui.input_selectize(
@@ -194,18 +189,6 @@ with ui.navset_pill(id="main_tabs"):
             ui.p(
                 "Overlay individual gender breakdowns alongside the aggregate series.",
                 class_="text-muted small mt-n1 mb-2",
-            )
-
-        # Occupation ribbon (level-aware, outside cards)
-        @render.ui
-        def occ_ribbon():
-            summary_df = all_occ_summary()
-            if summary_df.is_empty():
-                return None
-            return build_occupation_ribbon(
-                summary_df.to_pandas(),
-                all_occ_ai().to_pandas(),
-                int(app_input.occ_year()),
             )
 
         # Value boxes (outside cards)
@@ -553,16 +536,6 @@ def occ_summary():
         app_input.occupation(),
         int(app_input.occ_year()),
     )
-
-
-@reactive.calc
-def all_occ_summary():
-    return get_all_occ_summary(lf, app_input.occ_level(), int(app_input.occ_year()))
-
-
-@reactive.calc
-def all_occ_ai():
-    return get_all_occ_ai_exposure(lf, app_input.occ_level(), int(app_input.occ_year()))
 
 
 @reactive.calc
