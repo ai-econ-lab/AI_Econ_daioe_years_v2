@@ -46,21 +46,17 @@ def _pairs_filter(
     return lf.join(keys, on=["level", "occupation"], how="inner")
 
 
-def get_occ_summary(
+# ── Single Occupation helpers ──────────────────────────────────────────────────
+
+
+def _occ_summary_lf(
     lf: pl.LazyFrame,
     level: str,
     occupation: str,
     year: int,
-) -> dict | None:
-    """
-    Aggregate employment count and percentage changes for one occupation and year.
-
-    Filters by both level and occupation to avoid double-counting occupations that
-    share a name across SSYK levels.
-    Returns a dict with keys: employment, pct_1y, pct_3y, pct_5y, year.
-    Returns None if no data matches the filters.
-    """
-    df = (
+) -> pl.LazyFrame:
+    """Lazy query for per-occupation employment summary (without collect)."""
+    return (
         lf.filter(
             (pl.col("level") == level)
             & (pl.col("occupation") == occupation)
@@ -83,12 +79,13 @@ def get_occ_summary(
                 _safe_pct("chg_5y", "count", "pct_chg_5y"),
             ],
         )
-        .collect()
     )
 
+
+def _process_summary_df(df: pl.DataFrame) -> dict | None:
+    """Convert a collected occ summary DataFrame to the dict expected by build_value_boxes."""
     if df.is_empty():
         return None
-
     row = df.row(0, named=True)
     return {
         "employment": row["count"],
@@ -99,29 +96,23 @@ def get_occ_summary(
     }
 
 
-def get_occ_ai_exposure(
+def _occ_ai_exposure_lf(
     lf: pl.LazyFrame,
     level: str,
     occupation: str,
     year: int,
-) -> pl.DataFrame:
-    """
-    Return mean weighted AI exposure scores, exposure levels, and percentile ranks per sub-domain.
-
-    Filters by level and occupation to avoid aggregating across SSYK levels.
-    Returns a long-format DataFrame with columns: domain, score, level, level_label, percentile.
-    """
+) -> pl.LazyFrame:
+    """Lazy query for raw AI exposure columns (without collect)."""
     select_cols = AI_WAVG_COLS + AI_LEVEL_COLS + AI_PCTL_COLS
-    df = (
-        lf.filter(
-            (pl.col("level") == level)
-            & (pl.col("occupation") == occupation)
-            & (pl.col("year") == year),
-        )
-        .select(select_cols)
-        .collect()
-    )
+    return lf.filter(
+        (pl.col("level") == level)
+        & (pl.col("occupation") == occupation)
+        & (pl.col("year") == year),
+    ).select(select_cols)
 
+
+def _process_exposure_df(df: pl.DataFrame) -> pl.DataFrame:
+    """Convert a collected raw exposure DataFrame to long-format for build_ai_exposure_bar."""
     rows = []
     for wavg_col, level_col, pctl_col in zip(
         AI_WAVG_COLS,
@@ -143,6 +134,61 @@ def get_occ_ai_exposure(
             },
         )
     return pl.DataFrame(rows).sort("score")
+
+
+def get_occ_summary(
+    lf: pl.LazyFrame,
+    level: str,
+    occupation: str,
+    year: int,
+) -> dict | None:
+    """
+    Aggregate employment count and percentage changes for one occupation and year.
+
+    Filters by both level and occupation to avoid double-counting occupations that
+    share a name across SSYK levels.
+    Returns a dict with keys: employment, pct_1y, pct_3y, pct_5y, year.
+    Returns None if no data matches the filters.
+    """
+    return _process_summary_df(_occ_summary_lf(lf, level, occupation, year).collect())
+
+
+def get_occ_ai_exposure(
+    lf: pl.LazyFrame,
+    level: str,
+    occupation: str,
+    year: int,
+) -> pl.DataFrame:
+    """
+    Return mean weighted AI exposure scores, exposure levels, and percentile ranks per sub-domain.
+
+    Filters by level and occupation to avoid aggregating across SSYK levels.
+    Returns a long-format DataFrame with columns: domain, score, level, level_label, percentile.
+    """
+    return _process_exposure_df(
+        _occ_ai_exposure_lf(lf, level, occupation, year).collect()
+    )
+
+
+def get_occ_core(
+    lf: pl.LazyFrame,
+    level: str,
+    occupation: str,
+    year: int,
+) -> tuple[dict | None, pl.DataFrame]:
+    """
+    Run the occ summary and AI exposure queries in parallel via collect_all.
+
+    Returns (summary_dict, exposure_df) — the same types as get_occ_summary and
+    get_occ_ai_exposure respectively.
+    """
+    summary_df, exposure_raw = pl.collect_all(
+        [
+            _occ_summary_lf(lf, level, occupation, year),
+            _occ_ai_exposure_lf(lf, level, occupation, year),
+        ]
+    )
+    return _process_summary_df(summary_df), _process_exposure_df(exposure_raw)
 
 
 def get_occ_employment_by_age(
@@ -191,21 +237,13 @@ def get_occ_employment_by_age(
     return df.with_columns(pl.col("age_group").alias("series"))
 
 
-def get_comparison_employment(
-    lf: pl.LazyFrame,
-    occ_pairs: list[tuple[str, str]],
-    age_groups: list[str],
-) -> pl.DataFrame:
-    """
-    Return total employment per year for each (level, occupation) pair.
+# ── Compare Occupations helpers ────────────────────────────────────────────────
 
-    occ_pairs: list of (level, occupation) tuples identifying each selected occupation.
-    Aggregates across all sexes and the selected age groups.
-    Returns a DataFrame with columns: year, level, occupation, count, pct_chg_1y.
-    """
+
+def _comp_emp_lf(base: pl.LazyFrame, age_groups: list[str]) -> pl.LazyFrame:
+    """Lazy query for per-occupation employment trend (without collect)."""
     return (
-        _pairs_filter(lf, occ_pairs)
-        .filter(pl.col("age_group").is_in(age_groups))
+        base.filter(pl.col("age_group").is_in(age_groups))
         .group_by(["year", "level", "occupation"])
         .agg(
             [
@@ -217,25 +255,17 @@ def get_comparison_employment(
             _safe_pct("chg_1y", "count", "pct_chg_1y"),
         )
         .sort(["level", "occupation", "year"])
-        .collect()
     )
 
 
-def get_comp_summary(
-    lf: pl.LazyFrame,
-    occ_pairs: list[tuple[str, str]],
-    year: int,
+def _comp_summary_lf(
+    base: pl.LazyFrame,
     age_groups: list[str],
-) -> pl.DataFrame:
-    """
-    Return a per-occupation employment summary for the selected year and age groups.
-
-    occ_pairs: list of (level, occupation) tuples.
-    Returns a DataFrame with columns: level, occupation, count, pct_chg_1y, pct_chg_3y, pct_chg_5y.
-    """
+    year: int,
+) -> pl.LazyFrame:
+    """Lazy query for per-occupation employment summary for a given year (without collect)."""
     return (
-        _pairs_filter(lf, occ_pairs)
-        .filter(
+        base.filter(
             (pl.col("year") == year) & pl.col("age_group").is_in(age_groups),
         )
         .group_by(["level", "occupation"])
@@ -255,8 +285,46 @@ def get_comp_summary(
             ],
         )
         .sort(["level", "occupation"])
-        .collect()
     )
+
+
+def _comp_radar_lf(base: pl.LazyFrame, year: int) -> pl.LazyFrame:
+    """Lazy query for per-occupation AI percentile scores (without collect)."""
+    return (
+        base.filter(pl.col("year") == year)
+        .group_by(["level", "occupation"])
+        .agg([pl.col(c).mean() for c in AI_PCTL_COLS])
+    )
+
+
+def get_comparison_employment(
+    lf: pl.LazyFrame,
+    occ_pairs: list[tuple[str, str]],
+    age_groups: list[str],
+) -> pl.DataFrame:
+    """
+    Return total employment per year for each (level, occupation) pair.
+
+    occ_pairs: list of (level, occupation) tuples identifying each selected occupation.
+    Aggregates across all sexes and the selected age groups.
+    Returns a DataFrame with columns: year, level, occupation, count, pct_chg_1y.
+    """
+    return _comp_emp_lf(_pairs_filter(lf, occ_pairs), age_groups).collect()
+
+
+def get_comp_summary(
+    lf: pl.LazyFrame,
+    occ_pairs: list[tuple[str, str]],
+    year: int,
+    age_groups: list[str],
+) -> pl.DataFrame:
+    """
+    Return a per-occupation employment summary for the selected year and age groups.
+
+    occ_pairs: list of (level, occupation) tuples.
+    Returns a DataFrame with columns: level, occupation, count, pct_chg_1y, pct_chg_3y, pct_chg_5y.
+    """
+    return _comp_summary_lf(_pairs_filter(lf, occ_pairs), age_groups, year).collect()
 
 
 def get_comp_radar(
@@ -269,10 +337,27 @@ def get_comp_radar(
 
     Returns a DataFrame with columns: level, occupation, pctl_<metric>_wavg for each metric.
     """
-    return (
-        _pairs_filter(lf, occ_pairs)
-        .filter(pl.col("year") == year)
-        .group_by(["level", "occupation"])
-        .agg([pl.col(c).mean() for c in AI_PCTL_COLS])
-        .collect()
+    return _comp_radar_lf(_pairs_filter(lf, occ_pairs), year).collect()
+
+
+def get_compare_all(
+    lf: pl.LazyFrame,
+    occ_pairs: list[tuple[str, str]],
+    age_groups: list[str],
+    year: int,
+) -> tuple[pl.DataFrame, pl.DataFrame, pl.DataFrame]:
+    """
+    Run the employment trend, summary, and radar queries in parallel via collect_all.
+
+    Returns (emp_df, summary_df, radar_df) — the same types as get_comparison_employment,
+    get_comp_summary, and get_comp_radar respectively.
+    """
+    base = _pairs_filter(lf, occ_pairs)
+    emp_df, summary_df, radar_df = pl.collect_all(
+        [
+            _comp_emp_lf(base, age_groups),
+            _comp_summary_lf(base, age_groups, year),
+            _comp_radar_lf(base, year),
+        ]
     )
+    return emp_df, summary_df, radar_df
