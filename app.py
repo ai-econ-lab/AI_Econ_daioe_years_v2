@@ -8,12 +8,9 @@ from shiny.express import input as app_input
 from shinywidgets import render_widget
 
 from src.calcs import (
-    get_comp_radar,
-    get_comp_summary,
-    get_comparison_employment,
-    get_occ_ai_exposure,
+    get_compare_all,
+    get_occ_core,
     get_occ_employment_by_age,
-    get_occ_summary,
 )
 from src.constants import FIRST_COLS, METRICS
 from src.data import (
@@ -348,11 +345,8 @@ with ui.navset_pill(id="main_tabs"):
                         "Select occupations and age groups from the sidebar to compare.",
                         class_="text-muted p-3",
                     )
-                pairs = _parse_comp_occs(occs, app_input.comp_level())
-                df = get_comp_summary(lf, pairs, int(app_input.comp_year()), ages)
-                df = _occ_display_col(df, app_input.comp_level() == "All Levels")
                 return ui.div(
-                    as_great_table_html(df.to_pandas(), METRICS),
+                    as_great_table_html(comp_summary_data_pd(), METRICS),
                     style="overflow: auto; width: 100%; height: 100%;",
                 )
 
@@ -524,8 +518,9 @@ with ui.navset_pill(id="main_tabs"):
 
 
 @reactive.calc
-def occ_summary():
-    return get_occ_summary(
+def occ_core():
+    """Run occ summary and AI exposure queries in parallel via collect_all."""
+    return get_occ_core(
         lf,
         app_input.occ_level(),
         app_input.occupation(),
@@ -534,13 +529,13 @@ def occ_summary():
 
 
 @reactive.calc
+def occ_summary():
+    return occ_core()[0]
+
+
+@reactive.calc
 def occ_ai_exposure():
-    return get_occ_ai_exposure(
-        lf,
-        app_input.occ_level(),
-        app_input.occupation(),
-        int(app_input.occ_year()),
-    )
+    return occ_core()[1]
 
 
 @reactive.calc
@@ -571,11 +566,16 @@ def occ_employment_by_age():
 
 
 @reactive.calc
-def comparison_data():
+def comp_all_data():
+    """Run employment trend, summary, and radar queries in parallel via collect_all."""
     occs = list(app_input.comp_occs() or [])
     ages = list(app_input.comp_age() or [])
+    year = int(app_input.comp_year())
+    level = app_input.comp_level()
+    is_all = level == "All Levels"
+
     if not occs or not ages:
-        return pl.DataFrame(
+        empty_emp = pl.DataFrame(
             schema={
                 "year": pl.Int64,
                 "occupation": pl.String,
@@ -583,19 +583,30 @@ def comparison_data():
                 "pct_chg_1y": pl.Float64,
             },
         )
-    pairs = _parse_comp_occs(occs, app_input.comp_level())
-    df = get_comparison_employment(lf, pairs, ages)
-    return _occ_display_col(df, app_input.comp_level() == "All Levels")
+        return empty_emp, pl.DataFrame(), pl.DataFrame()
+
+    pairs = _parse_comp_occs(occs, level)
+    emp_df, summary_df, radar_df = get_compare_all(lf, pairs, ages, year)
+    return (
+        _occ_display_col(emp_df, is_all),
+        _occ_display_col(summary_df, is_all),
+        _occ_display_col(radar_df, is_all),
+    )
+
+
+@reactive.calc
+def comparison_data():
+    return comp_all_data()[0]
+
+
+@reactive.calc
+def comp_summary_data():
+    return comp_all_data()[1]
 
 
 @reactive.calc
 def comp_radar_data():
-    occs = list(app_input.comp_occs() or [])
-    if not occs:
-        return pl.DataFrame()
-    pairs = _parse_comp_occs(occs, app_input.comp_level())
-    df = get_comp_radar(lf, pairs, int(app_input.comp_year()))
-    return _occ_display_col(df, app_input.comp_level() == "All Levels")
+    return comp_all_data()[2]
 
 
 @reactive.calc
@@ -611,6 +622,11 @@ def occ_ai_exposure_pd():
 @reactive.calc
 def comparison_data_pd():
     return comparison_data().to_pandas()
+
+
+@reactive.calc
+def comp_summary_data_pd():
+    return comp_summary_data().to_pandas()
 
 
 @reactive.calc
