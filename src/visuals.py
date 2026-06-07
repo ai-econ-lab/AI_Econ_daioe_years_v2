@@ -1,10 +1,13 @@
 import re
+from typing import TYPE_CHECKING
 
 import faicons as fa
-import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 from shiny import ui
+
+if TYPE_CHECKING:
+    import pandas as pd
 
 # Matches any leading non-ASCII characters (emojis, symbols) and trailing space.
 _EMOJI_PREFIX = re.compile(r"^[^\x00-\x7F]+\s*")
@@ -53,11 +56,11 @@ def _empty_figure() -> go.Figure:
     return fig
 
 
-def _nullify(df: pd.DataFrame, cols: list[str]) -> pd.DataFrame:
+def _nullify(df: "pd.DataFrame", cols: list[str]) -> "pd.DataFrame":
     """Replace NaN with Python None in specified columns so Plotly serialises them as JSON null."""
     for col in cols:
         if col in df.columns:
-            df[col] = df[col].astype(object).where(pd.notna(df[col]), None)
+            df[col] = df[col].astype(object).where(df[col].notna(), None)
     return df
 
 
@@ -135,7 +138,7 @@ def build_value_boxes(summary: dict, occupation: str) -> ui.Tag:
     )
 
 
-def build_age_chart(df: pd.DataFrame, occupation: str) -> go.Figure:
+def build_age_chart(df: "pd.DataFrame", occupation: str) -> go.Figure:
     """
     Build a Plotly line chart of 1-yr employment % change by age group over time.
 
@@ -193,12 +196,14 @@ def build_age_chart(df: pd.DataFrame, occupation: str) -> go.Figure:
     return fig
 
 
-def build_employment_count_chart(df: pd.DataFrame, occupation: str) -> go.Figure:
+def build_employment_count_chart(df: "pd.DataFrame", occupation: str) -> go.Figure:
     """
     Build a Plotly line chart of absolute employment count by age group over time.
 
     1-yr % change is shown on hover. Returns an empty figure if df is empty.
     """
+    import pandas as pd
+
     if df.empty:
         return _empty_figure()
 
@@ -251,7 +256,7 @@ def build_employment_count_chart(df: pd.DataFrame, occupation: str) -> go.Figure
     return fig
 
 
-def build_comparison_employment_plot(df: pd.DataFrame) -> go.Figure:
+def build_comparison_employment_plot(df: "pd.DataFrame") -> go.Figure:
     """Build a line chart comparing 1-yr employment % change across selected occupations."""
     if df.empty:
         return _empty_figure()
@@ -301,7 +306,7 @@ def build_comparison_employment_plot(df: pd.DataFrame) -> go.Figure:
     return fig
 
 
-def build_comp_radar_plot(df: pd.DataFrame, metrics: dict[str, str]) -> go.Figure:
+def build_comp_radar_plot(df: "pd.DataFrame", metrics: dict[str, str]) -> go.Figure:
     """Build a radar chart comparing AI percentile scores across selected occupations."""
     if df.empty:
         return _empty_figure()
@@ -341,7 +346,7 @@ def build_comp_radar_plot(df: pd.DataFrame, metrics: dict[str, str]) -> go.Figur
     return fig
 
 
-def build_ai_exposure_bar(df: pd.DataFrame, occupation: str, year: int) -> go.Figure:
+def build_ai_exposure_bar(df: "pd.DataFrame", occupation: str, year: int) -> go.Figure:
     """
     Build a horizontal bar chart of AI exposure level per sub-domain.
 
@@ -401,8 +406,17 @@ def _strip_emoji(val: object) -> object:
     return val
 
 
+_kaleido_started = False
+
+
 def export_fig(fig: go.Figure, width: int = 1000, height: int = 650) -> bytes:
     """Return PNG bytes of a figure with a solid white background and no emoji labels."""
+    global _kaleido_started
+    if not _kaleido_started:
+        import kaleido
+
+        kaleido.start_sync_server(silence_warnings=True)
+        _kaleido_started = True
     import copy
 
     fig = copy.deepcopy(fig)

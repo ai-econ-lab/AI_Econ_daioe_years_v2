@@ -168,7 +168,7 @@ def get_occ_employment_by_age(
         & (pl.col("age_group").is_in(age_groups)),
     )
 
-    def _by_age(lf_in: pl.LazyFrame, sex_label: str) -> pl.DataFrame:
+    def _by_age_lf(lf_in: pl.LazyFrame, sex_label: str) -> pl.LazyFrame:
         return (
             lf_in.group_by(["year", "age_group"])
             .agg([pl.col("count").sum(), _null_safe_sum("chg_1y")])
@@ -176,13 +176,13 @@ def get_occ_employment_by_age(
             .filter(pl.col("year").is_between(year_min, year_max))
             .with_columns(pl.lit(sex_label).alias("sex"))
             .sort(["age_group", "year"])
-            .collect()
         )
 
-    frames = [_by_age(base, "All")]
+    lazy_frames = [_by_age_lf(base, "All")]
     for s in extra_sexes:
-        frames.append(_by_age(base.filter(pl.col("sex") == s), s.capitalize()))
+        lazy_frames.append(_by_age_lf(base.filter(pl.col("sex") == s), s.capitalize()))
 
+    frames = pl.collect_all(lazy_frames)
     df = pl.concat(frames)
     if extra_sexes:
         return df.with_columns(
