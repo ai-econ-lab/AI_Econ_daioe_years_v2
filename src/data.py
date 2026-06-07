@@ -14,23 +14,22 @@ _ABOUT_TEMPLATE: str = (BASE_DIR / "md_files" / "about.md").read_text(encoding="
 
 DATA_PATH = BASE_DIR / "data" / "daioe_scb_years_processed.parquet"
 
-lf = pl.scan_parquet(DATA_PATH)
+lf = pl.read_parquet(DATA_PATH).lazy()
 lf.collect_schema()
 
-LEVELS: list[str] = (
-    lf.select(pl.col("level").unique().sort()).collect().to_series().to_list()
-)
+# Query metadata in parallel using collect_all
+lf_levels = lf.select(pl.col("level").unique().sort())
+lf_sexes = lf.select(pl.col("sex").unique().sort())
+lf_ages = lf.select(pl.col("age_group").unique())
+lf_years = lf.select(pl.col("year").unique().sort())
 
-SEXES: list[str] = (
-    lf.select(pl.col("sex").unique().sort()).collect().to_series().to_list()
-)
+_meta_dfs = pl.collect_all([lf_levels, lf_sexes, lf_ages, lf_years])
 
-_present = lf.select(pl.col("age_group").unique()).collect().to_series().to_list()
+LEVELS: list[str] = _meta_dfs[0].to_series().to_list()
+SEXES: list[str] = _meta_dfs[1].to_series().to_list()
+_present = _meta_dfs[2].to_series().to_list()
 AGES: list[str] = [x for x in AGE_ORDER if x in _present]
-
-YEARS: list[int] = (
-    lf.select(pl.col("year").unique().sort()).collect().to_series().to_list()
-)
+YEARS: list[int] = _meta_dfs[3].to_series().to_list()
 
 YEAR_MIN: int = min(YEARS)
 YEAR_MAX: int = max(YEARS)
@@ -43,12 +42,18 @@ def build_choices_by_level(
     levels: list[str],
 ) -> dict[str, dict[str, str]]:
     """Return a dict mapping each SSYK level to its sorted occupation choices."""
+    # Retrieve all unique level-occupation pairs in a single collect
+    df_occs = (
+        lf.select(["level", "occupation"])
+        .unique()
+        .sort(["level", "occupation"])
+        .collect()
+    )
     out: dict[str, dict[str, str]] = {}
     for lvl in levels:
         occs = (
-            lf.filter(pl.col("level") == lvl)
-            .select(pl.col("occupation").unique().sort())
-            .collect()
+            df_occs.filter(pl.col("level") == lvl)
+            .select("occupation")
             .to_series()
             .to_list()
         )
