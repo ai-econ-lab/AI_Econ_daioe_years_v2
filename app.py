@@ -1,3 +1,4 @@
+from datetime import datetime
 from pathlib import Path
 
 import faicons as fa
@@ -450,9 +451,8 @@ with ui.navset_pill(id="main_tabs"):
 
             @render.download(
                 filename=lambda: (
-                    "daioe_swedish_occupations_"
-                    f"{__import__('datetime').datetime.now().strftime('%Y-%m-%d')}."
-                    f"{download_extension(app_input.download_format())}"
+                    f"daioe_swedish_occupations_{datetime.now().strftime('%Y-%m-%d')}"
+                    f".{download_extension(app_input.download_format())}"
                 ),
                 media_type=lambda: download_media_type(app_input.download_format()),
                 label="Download",
