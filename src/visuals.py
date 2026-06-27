@@ -1,3 +1,4 @@
+import copy
 import re
 from typing import TYPE_CHECKING
 
@@ -417,8 +418,6 @@ def export_fig(fig: go.Figure, width: int = 1000, height: int = 650) -> bytes:
 
         kaleido.start_sync_server(silence_warnings=True)
         _kaleido_started = True
-    import copy
-
     fig = copy.deepcopy(fig)
     for trace in fig.data:
         for field in ("y", "x", "theta", "text", "name"):
