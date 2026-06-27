@@ -15,7 +15,6 @@ _ABOUT_TEMPLATE: str = (BASE_DIR / "md_files" / "about.md").read_text(encoding="
 DATA_PATH = BASE_DIR / "data" / "daioe_scb_years_processed.parquet"
 
 lf = pl.read_parquet(DATA_PATH).lazy()
-lf.collect_schema()
 
 # Query metadata in parallel using collect_all
 lf_levels = lf.select(pl.col("level").unique().sort())
