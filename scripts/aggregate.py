@@ -19,6 +19,11 @@ import polars as pl
 
 YEAR_CHECK = 2022
 
+# Canonical row order so identical data always serialises to identical bytes;
+# group_by()'s output order is not guaranteed stable across runs, and without
+# this every write looked like a data change to git regardless of content.
+SORT_KEY = ["level", "ssyk_code", "age", "sex", "year"]
+
 
 # -------------------------
 # Config
@@ -122,7 +127,7 @@ def load_name_map(paths: Paths) -> pl.DataFrame:
             pl.col("name").cast(pl.Utf8),
         )
         .select(["code", "name"])
-        .unique(subset=["code"], keep="first")
+        .unique(subset=["code"], keep="first", maintain_order=True)
     )
 
 
@@ -149,7 +154,7 @@ def diagnostics(df_join: pl.DataFrame) -> tuple[pl.DataFrame, pl.DataFrame]:
 
 
 def write_output(df: pl.DataFrame, paths: Paths) -> None:
-    df.write_parquet(paths.out_file)
+    df.sort(SORT_KEY).write_parquet(paths.out_file)
 
 
 # -------------------------

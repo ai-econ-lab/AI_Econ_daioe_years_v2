@@ -14,3 +14,7 @@ wheels/
 .vscode
 .claude
 src/
+
+# Generated pipeline data: published to the pipeline-data-latest GitHub
+# release instead of being committed onto this branch's tree.
+data/

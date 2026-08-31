@@ -158,10 +158,17 @@ def main() -> None:
     log(f"[4] Conflicting count groups: {conflict_groups}")
 
     # ---- Resolve newest wins (rank 0 = newest)
+    # Sort on the full identity plus source_rank and count, not source_rank
+    # alone: source_rank ties (every row from the newest file shares rank 0),
+    # so a sort on source_rank alone is unstable and .unique(keep="first")
+    # could pick a different row on different runs when an identity group has
+    # more than one row in the newest file. This is a total order (id_cols is
+    # the row identity), so the pick is now deterministic, not just the
+    # output order.
     df_resolved = (
         combined_lf
-        .sort("source_rank")                    # 0 first
-        .unique(subset=id_cols, keep="first")   # keep newest
+        .sort([*id_cols, "source_rank", "count"])
+        .unique(subset=id_cols, keep="first", maintain_order=True)
         .collect()
     )
 
@@ -170,7 +177,7 @@ def main() -> None:
 
     # ---- Drop provenance cols
     cols_to_drop = [c for c in PROVENANCE_COLS if c in df_resolved.columns]
-    df_final = df_resolved.drop(cols_to_drop) if cols_to_drop else df_resolved
+    df_final = (df_resolved.drop(cols_to_drop) if cols_to_drop else df_resolved).sort(id_cols)
 
     df_final.write_parquet(cfg.out_file)
     log(f"[6] Saved cleaned dataset: {cfg.out_file}")

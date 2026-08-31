@@ -25,6 +25,12 @@ from pyscbwrapper import SCB
 # =========================
 TableSpec = tuple[str, str, str, str, str]
 
+# Canonical row order so identical data always serialises to identical bytes;
+# group_by/API response order is not guaranteed stable across runs, and
+# without this every write looked like a data change to git regardless of
+# content.
+SORT_KEY = ["code", "year", "sex", "age"]
+
 
 @dataclass(frozen=True)
 class Config:
@@ -139,8 +145,12 @@ def transform(raw_data: list[dict], occ_map: dict, sex_map: dict) -> pl.DataFram
         .with_columns(
             pl.col("code").cast(pl.Utf8),
             pl.col("occupation").cast(pl.Utf8),
-            pl.col("age").cast(pl.Categorical),
-            pl.col("sex").cast(pl.Categorical),
+            # Utf8, not Categorical: a Categorical's dictionary encoding
+            # depends on first-encounter order, a second byte-churn source a
+            # row sort alone doesn't fix. Downstream consumers already cast
+            # both back to Utf8 anyway.
+            pl.col("age").cast(pl.Utf8),
+            pl.col("sex").cast(pl.Utf8),
             pl.col("year").cast(pl.Int64),
             pl.col("count").cast(pl.Int64),
         )
@@ -168,7 +178,7 @@ def fetch_clean_write(cfg: Config, tab_id: str, spec: TableSpec) -> bool:
 
         # 4) write + log
         out_path = cfg.out_dir / f"{tab_id}.parquet"
-        df.write_parquet(out_path)
+        df.sort(SORT_KEY).write_parquet(out_path)
         log(f"Saved: {out_path} ({df.height} rows)")
 
     except Exception as e:  # noqa: BLE001
