@@ -300,6 +300,12 @@ def aggregate_daioe_level(  # noqa: PLR0913
         )
         .with_columns(pl.lit(level_label).alias("level"))
         .rename({code_col: "ssyk_code"})
+        # Belt-and-suspenders against float-summation-order drift: group
+        # reductions above are parallelised, so a last-ULP difference between
+        # runs is possible in principle. Rounding here, before ranking, means
+        # a spurious ULP difference can no longer flip which side of a
+        # quintile boundary a Level_Exposure bin lands on.
+        .with_columns(pl.col(f"^{prefix}.*_(avg|wavg)$").round(10))
     )
 
     if not add_percentiles:
@@ -446,7 +452,9 @@ def build_final_merge(
         Full merged frame with SCB counts and DAIOE exposure metrics.
 
     """
-    return scb_lf.join(daioe_all_levels, on=["year", "ssyk_code", "level"], how="left")
+    return scb_lf.join(
+        daioe_all_levels, on=["year", "ssyk_code", "level"], how="left", validate="m:1",
+    )
 
 
 def compute_changes(final_lf: pl.LazyFrame) -> pl.LazyFrame:
