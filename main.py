@@ -19,13 +19,22 @@ import polars as pl
 # =========================
 # Constants
 # =========================
+# joseph-data/07_translate_ssyk was renamed and transferred; it is now
+# ai-econ-lab/daioe_translations.
 DAIOE_SOURCE: str = (
-    "https://raw.githubusercontent.com/joseph-data/07_translate_ssyk/main/"
+    "https://raw.githubusercontent.com/ai-econ-lab/daioe_translations/main/"
     "03_translated_files/daioe_ssyk2012_translated.csv"
 )
-SCB_SOURCE: str = (
-    "https://raw.githubusercontent.com/joseph-data/AI_Econ_daioe_years/daioe_pull/"
-    "data/processed/ssyk12_aggregated_ssyk4_to_ssyk1.parquet"
+# This branch's own workflow already checks out data/processed/
+# ssyk12_aggregated_ssyk4_to_ssyk1.parquet (built by scb_pull, committed
+# here by workflow 01); this was fetching the same-named file from
+# joseph-data/AI_Econ_daioe_years (a different, now-retired repo) instead
+# of reading the local copy already sitting in this checkout.
+SCB_SOURCE: Path = (
+    Path(__file__).resolve().parent
+    / "data"
+    / "processed"
+    / "ssyk12_aggregated_ssyk4_to_ssyk1.parquet"
 )
 SSYK12_MIN_YEAR: int = 2014
 SSYK4_CODE_LEN: int = 4
@@ -56,7 +65,7 @@ def log(msg: str) -> None:
 # DAIOE Processing
 # =========================
 def load_sources(
-    daioe_url: str, scb_url: str,
+    daioe_url: str, scb_url: str | Path,
 ) -> tuple[pl.LazyFrame, pl.LazyFrame]:
     """
     Load the DAIOE exposure CSV and the SCB aggregated parquet as LazyFrames.
