@@ -14,3 +14,10 @@ wheels/
 .vscode
 .claude
 src/
+
+# Generated pipeline data: the SCB input is fetched from the
+# pipeline-data-latest GitHub release (see workflow 02), and this
+# branch's own daioe_scb_years_processed.parquet was a stale copy
+# nothing on this branch reads -- the final file lives on development
+# and main instead, where the Docker build needs it.
+data/
