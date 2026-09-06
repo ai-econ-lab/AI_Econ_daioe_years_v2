@@ -62,6 +62,8 @@ jobs:
             "md_files/intro.md"
             "md_files/about.md"
             "data/daioe_scb_years_processed.parquet"
+            "data/svenska_titlar.csv"
+            "data/sok_nyckelord.csv"
             "Dockerfile"
             ".dockerignore"
             "pyproject.toml"
@@ -93,6 +95,8 @@ jobs:
             "md_files/intro.md"
             "md_files/about.md"
             "data/daioe_scb_years_processed.parquet"
+            "data/svenska_titlar.csv"
+            "data/sok_nyckelord.csv"
             "Dockerfile"
             ".dockerignore"
             "pyproject.toml"
@@ -137,6 +141,8 @@ jobs:
             md_files/intro.md \
             md_files/about.md \
             data/daioe_scb_years_processed.parquet \
+            data/svenska_titlar.csv \
+            data/sok_nyckelord.csv \
             Dockerfile \
             .dockerignore \
             pyproject.toml \
