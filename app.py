@@ -24,6 +24,7 @@ from src.data import (
     YEAR_MIN,
     YEARS,
     build_choices_by_level,
+    build_options_by_level,
     lf,
 )
 from src.utils import (
@@ -59,6 +60,7 @@ LEVEL_LABELS = {
     "SSYK4": "SSYK 4 - Detailed units",
 }
 OCCUPATION_CHOICES = build_choices_by_level(lf, LEVELS)
+OCCUPATION_OPTS = build_options_by_level(lf, LEVELS)
 DEFAULT_LEVEL = "SSYK4" if "SSYK4" in LEVELS else LEVELS[0]
 DEFAULT_OCCUPATION = next(iter(OCCUPATION_CHOICES[DEFAULT_LEVEL]))
 _LEVEL_CHOICES = {level: LEVEL_LABELS.get(level, level) for level in LEVELS}
@@ -126,13 +128,23 @@ with ui.navset_pill(id="main_tabs"):
                 "Sets the occupational detail level and updates the occupation list.",
                 class_="text-muted small mt-n1 mb-2",
             )
-            ui.input_selectize(
-                "occupation",
-                "Occupation",
-                choices=OCCUPATION_CHOICES[DEFAULT_LEVEL],
-                selected=DEFAULT_OCCUPATION,
-                options={"placeholder": "Search occupation..."},
-            )
+            @render.ui
+            def occupation_picker():
+                level = app_input.occ_level()
+                opts = OCCUPATION_OPTS[level]
+                return ui.input_selectize(
+                    "occupation",
+                    "Occupation",
+                    choices=[],
+                    options={
+                        "options": opts,
+                        "valueField": "value",
+                        "labelField": "label",
+                        "searchField": ["label", "sok"],
+                        "items": [opts[0]["value"]] if opts else [],
+                        "placeholder": "Search occupation (svenska eller engelska)...",
+                    },
+                )
             ui.p(
                 "Updates value boxes, AI exposure chart, and both employment charts.",
                 class_="text-muted small mt-n1 mb-2",
@@ -656,12 +668,9 @@ def download_frame():
 # ── Reactive effects ──────────────────────────────────────────
 
 
-@reactive.effect
-def _sync_occupation_choices():
-    """Update the occupation selectize choices whenever the SSYK level changes."""
-    level = app_input.occ_level()
-    choices = OCCUPATION_CHOICES[level]
-    ui.update_selectize("occupation", choices=choices, selected=next(iter(choices)))
+# The occupation picker re-renders per level (see occupation_picker above), so no
+# update effect is needed; re-rendering carries the full option objects with the
+# bilingual search field.
 
 
 @reactive.effect
