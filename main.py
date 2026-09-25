@@ -15,6 +15,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import polars as pl
+import polars.selectors as cs
 
 # =========================
 # Constants
@@ -133,7 +134,11 @@ def derive_ssyk_levels(daioe_lf: pl.LazyFrame) -> pl.LazyFrame:
 
     """
     return (
+        # The source CSV carries literal NaN for unscored occupations; NaN
+        # would propagate through every mean/sum and rank as the highest
+        # score, so make it null before anything is aggregated.
         daioe_lf
+        .with_columns((cs.starts_with("daioe_") & cs.float()).fill_nan(None))
         .with_columns(
             pl.col("ssyk2012_4").str.slice(0, 1).alias("code_1"),
             pl.col("ssyk2012_4").str.slice(0, 2).alias("code_2"),
@@ -290,13 +295,26 @@ def aggregate_daioe_level(  # noqa: PLR0913
     daioe_cols = [c for c in lf.collect_schema().names() if c.startswith(prefix)]
     w = pl.col(weight_col)
 
+    # The weight in the denominator only counts occupations that have a
+    # score, otherwise a group with an unscored occupation is biased low.
+    weighted_avg_exprs = [
+        pl.when(
+            (denom := pl.when(pl.col(c).is_not_null()).then(w).otherwise(None).sum())
+            > 0,
+        )
+        .then((pl.col(c) * w).sum() / denom)
+        .otherwise(None)
+        .alias(f"{c}_wavg")
+        for c in daioe_cols
+    ]
+
     out = (
         lf
         .group_by(["year", code_col])
         .agg(
             w.sum().alias("weight_sum"),
             pl.col(daioe_cols).mean().name.suffix("_avg"),
-            ((pl.col(daioe_cols) * w).sum() / w.sum()).name.suffix("_wavg"),
+            *weighted_avg_exprs,
         )
         .with_columns(pl.lit(level_label).alias("level"))
         .rename({code_col: "ssyk_code"})
@@ -312,18 +330,19 @@ def aggregate_daioe_level(  # noqa: PLR0913
         return out
 
     group_keys = ["year", "level"]
-    rank_expr = (
-        pl.col(f"^{prefix}.*_(avg|wavg)$")
-        .rank(method="average", descending=descending)
-        .over(group_keys)
+    metric_cols = pl.col(f"^{prefix}.*_(avg|wavg)$")
+    # count() and rank() both skip nulls, so a missing score gets a null
+    # percentile instead of being ranked as the most exposed occupation.
+    n_expr = metric_cols.count().over(group_keys)
+    rank_expr = metric_cols.rank(method="average", descending=descending).over(
+        group_keys,
     )
-    n_expr = pl.len().over(group_keys)
 
     return out.with_columns(
         (
             pl.when(n_expr > 1)
             .then((rank_expr - 1) / (n_expr - 1))
-            .otherwise(0.0)
+            .otherwise(pl.when(rank_expr.is_not_null()).then(0.0))
             * pct_scale
         ).name.prefix("pctl_"),
     )
