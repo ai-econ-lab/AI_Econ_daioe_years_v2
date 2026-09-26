@@ -35,6 +35,14 @@ Data sources, key concept definitions, SSYK level descriptions, DAIOE sub-domain
 
 **Coverage:** Sweden, SSYK 2012 levels 1–4 (major groups through detailed units), updated yearly.
 
+## Dataset Releases
+
+The dataset the app reads, `daioe_scb_years_processed.parquet`, is also published as a GitHub release asset. `dataset-latest` holds the current file and is overwritten on every run. Each time the content changes, a dated release, `dataset-YYYY-MM-DD`, is also created; later runs leave it as it is (unless the data changes again on the same day), so cite one of those for a fixed version. GitHub shows each file's SHA-256 next to the asset. List them with:
+
+```bash
+gh release list --repo ai-econ-lab/AI_Econ_daioe_years_v2
+```
+
 ## Tech Stack
 
 - **[Shiny for Python](https://shiny.posit.co/py/)** (Express syntax) for the interactive UI
@@ -76,6 +84,8 @@ css/
   ticker.css                              # Occupation ribbon / ticker styles
 data/
   daioe_scb_years_processed.parquet       # Runtime dataset (auto-updated by CI)
+scripts/
+  validate.py                             # Dataset checks run by CI before promotion
 md_files/
   intro.md                                # Sidebar intro text
   about.md                                # About tab content
@@ -95,7 +105,7 @@ Each stage runs on push, daily cron at 00:00 UTC, or manual `workflow_dispatch`.
 | --- | --- | --- |
 | `scb_pull` | `01_scb_pull_to_daioe_pull.yml` | Fetches SCB yearly employment data, produces a raw parquet, commits to `daioe_pull` |
 | `daioe_pull` | `02_daioe_pull_to_development.yml` | Merges DAIOE AI-exposure scores, produces `daioe_scb_years_processed.parquet`, commits to `development` |
-| `development` | `03_development_to_main.yml` | Validates and promotes all deploy files to `main` |
+| `development` | `03_development_to_main.yml` | Checks the dataset with `scripts/validate.py`, promotes all deploy files to `main`, and publishes the dataset releases |
 | `main` | `sync_to_hub.yml` | Syncs `main` to the Hugging Face Space, triggering a Docker rebuild |
 
 ## About the Project
